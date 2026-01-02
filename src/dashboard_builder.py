@@ -167,27 +167,130 @@ class EnhancedDashboardBuilder:
         return html_content
     
     def _create_dashboard_figures(self, dashboard_type: str, 
-                                 df: pd.DataFrame, 
-                                 colors: List[str]) -> Dict[str, go.Figure]:
-        """Create figures based on dashboard type"""
+                             df: pd.DataFrame, 
+                             colors: List[str]) -> Dict[str, go.Figure]:
+        """Create figures based on dashboard type - SIMPLIFIED"""
         figures = {}
         
-        # Get layout configuration
-        layout_config = self.dashboard_layouts.get(dashboard_type, {})
+        # Get available columns
+        available_columns = df.columns.tolist()
         
         if dashboard_type == 'social_media':
-            figures.update(self._create_social_media_figures(df, colors, layout_config))
+            figures.update(self._create_simple_figures(df, colors, available_columns, "Social Media"))
         elif dashboard_type == 'performance_marketing':
-            figures.update(self._create_performance_figures(df, colors, layout_config))
+            figures.update(self._create_simple_figures(df, colors, available_columns, "Performance Marketing"))
         elif dashboard_type == 'kol_engagement':
-            figures.update(self._create_kol_figures(df, colors, layout_config))
+            figures.update(self._create_simple_figures(df, colors, available_columns, "KOL Engagement"))
         elif dashboard_type == 'community_marketing':
-            figures.update(self._create_community_figures(df, colors, layout_config))
+            figures.update(self._create_simple_figures(df, colors, available_columns, "Community Marketing"))
         elif dashboard_type == 'promotion_posts':
-            figures.update(self._create_promotion_figures(df, colors, layout_config))
+            figures.update(self._create_simple_figures(df, colors, available_columns, "Promotion Posts"))
         
         # Add summary indicators
         figures['summary_indicators'] = self._create_summary_indicators(df, dashboard_type)
+        
+        return figures
+    
+    def _create_simple_figures(self, df: pd.DataFrame, 
+                          colors: List[str], 
+                          available_columns: List[str],
+                          title: str) -> Dict[str, go.Figure]:
+        """Create simple figures with available data"""
+        figures = {}
+        
+        # 1. Simple bar chart for categorical data
+        categorical_cols = [col for col in ['platform', 'ad_type', 'kol_tier', 'campaign_type'] 
+                        if col in available_columns]
+        
+        if categorical_cols:
+            category_col = categorical_cols[0]
+            
+            # Find numeric columns
+            numeric_cols = df.select_dtypes(include=[int, float]).columns.tolist()
+            
+            if numeric_cols:
+                numeric_col = numeric_cols[0]  # Use first numeric column
+                
+                # Group by category
+                grouped_data = df.groupby(category_col)[numeric_col].sum().reset_index()
+                
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=grouped_data[category_col],
+                        y=grouped_data[numeric_col],
+                        name=numeric_col.replace('_', ' ').title(),
+                        marker_color=colors[0]
+                    )
+                ])
+                
+                fig.update_layout(
+                    title=f'{category_col.replace("_", " ").title()} by {numeric_col.replace("_", " ").title()}',
+                    template=self._get_chart_template(),
+                    height=400,
+                    xaxis_title=category_col.replace('_', ' ').title(),
+                    yaxis_title=numeric_col.replace('_', ' ').title()
+                )
+                
+                figures['main_chart'] = fig
+        
+        # 2. Simple pie chart if we have categorical data with counts
+        if categorical_cols:
+            category_col = categorical_cols[0]
+            value_counts = df[category_col].value_counts()
+            
+            fig2 = go.Figure(data=[go.Pie(
+                labels=value_counts.index,
+                values=value_counts.values,
+                hole=0.3,
+                marker_colors=colors[:len(value_counts)],
+                textinfo='label+percent'
+            )])
+            
+            fig2.update_layout(
+                title=f'Distribution by {category_col.replace("_", " ").title()}',
+                template=self._get_chart_template(),
+                height=400
+            )
+            
+            figures['distribution_chart'] = fig2
+        
+        # 3. If we have date column, create timeline
+        date_cols = [col for col in ['post_date', 'video_date', 'created_at', 'date'] 
+                    if col in available_columns]
+        
+        if date_cols:
+            date_col = date_cols[0]
+            try:
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                df_clean = df.dropna(subset=[date_col])
+                
+                if not df_clean.empty and numeric_cols:
+                    # Group by date
+                    numeric_col = numeric_cols[0]
+                    df_clean['date_group'] = df_clean[date_col].dt.to_period('D').dt.to_timestamp()
+                    timeline_data = df_clean.groupby('date_group')[numeric_col].sum().reset_index()
+                    
+                    fig3 = go.Figure(data=[
+                        go.Scatter(
+                            x=timeline_data['date_group'],
+                            y=timeline_data[numeric_col],
+                            mode='lines+markers',
+                            name=numeric_col.replace('_', ' ').title(),
+                            line=dict(color=colors[0], width=3)
+                        )
+                    ])
+                    
+                    fig3.update_layout(
+                        title=f'{numeric_col.replace("_", " ").title()} Trend',
+                        template=self._get_chart_template(),
+                        height=400,
+                        xaxis_title='Date',
+                        yaxis_title=numeric_col.replace('_', ' ').title()
+                    )
+                    
+                    figures['timeline_chart'] = fig3
+            except:
+                pass
         
         return figures
     
@@ -828,36 +931,24 @@ class EnhancedDashboardBuilder:
         return fig
     
     def _calculate_summary_metrics(self, df: pd.DataFrame, dashboard_type: str) -> Dict:
-        """Calculate summary metrics for dashboard"""
+        """Calculate summary metrics for dashboard - SIMPLIFIED"""
         metrics = {}
         
         # Common metrics
         metrics['Total Records'] = len(df)
         
-        # Dashboard-specific metrics
-        if dashboard_type == 'social_media':
-            if 'reach_views' in df.columns:
-                metrics['Total Reach'] = df['reach_views'].sum()
-            if 'engagement' in df.columns:
-                metrics['Total Engagement'] = df['engagement'].sum()
-            if 'platform' in df.columns:
-                metrics['Platforms'] = df['platform'].nunique()
+        # Count numeric columns
+        numeric_cols = df.select_dtypes(include=[int, float]).columns.tolist()
+        if numeric_cols:
+            metrics['Numeric Columns'] = len(numeric_cols)
+            
+            # Sum of first numeric column
+            metrics[f'Total {numeric_cols[0]}'] = df[numeric_cols[0]].sum()
         
-        elif dashboard_type == 'performance_marketing':
-            if 'spend' in df.columns:
-                metrics['Total Spend'] = df['spend'].sum()
-            if 'revenue' in df.columns:
-                metrics['Total Revenue'] = df['revenue'].sum()
-            if 'roi' in df.columns:
-                metrics['Avg ROI'] = f"{df['roi'].mean():.1f}%"
-        
-        elif dashboard_type == 'kol_engagement':
-            if 'kol_name' in df.columns:
-                metrics['Unique KOLs'] = df['kol_name'].nunique()
-            if 'views' in df.columns:
-                metrics['Total Views'] = df['views'].sum()
-            if 'kol_tier' in df.columns:
-                metrics['Top Tier'] = df['kol_tier'].value_counts().index[0]
+        # Count categorical columns
+        categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+        if categorical_cols:
+            metrics['Categorical Columns'] = len(categorical_cols)
         
         return metrics
     

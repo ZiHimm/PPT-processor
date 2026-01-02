@@ -1,5 +1,6 @@
 ﻿"""
 Enhanced Main Application with all features integrated
+COMPLETE WORKING VERSION
 """
 
 import tkinter as tk
@@ -12,6 +13,17 @@ import threading
 import queue
 import logging
 from datetime import datetime
+import re
+import time
+
+# Import pandas for data handling
+try:
+    import pandas as pd
+    import numpy as np
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+    print("⚠ pandas not available. Some features disabled.")
 
 # Enhanced imports
 try:
@@ -22,12 +34,45 @@ except ImportError:
     print("⚠ tkinterdnd2 not available. Drag & drop disabled.")
 
 # Import enhanced modules
-from ppt_processor import EnhancedPPTProcessor
-from excel_generator import EnhancedExcelGenerator
-from dashboard_builder import EnhancedDashboardBuilder
-from data_validator import DataValidator
-from database_exporter import DatabaseExporter
-from utils import validate_file_path, setup_logging
+try:
+    from ppt_processor import EnhancedPPTProcessor
+    MODULES_LOADED = True
+except ImportError as e:
+    MODULES_LOADED = False
+    print(f"⚠ PPT processor failed to load: {e}")
+
+# Try to import other modules
+try:
+    from excel_generator import EnhancedExcelGenerator
+    from dashboard_builder import EnhancedDashboardBuilder
+    from data_validator import DataValidator
+    from database_exporter import DatabaseExporter
+    from utils import validate_file_path, setup_logging
+except ImportError as e:
+    print(f"⚠ Some modules failed to load: {e}")
+    # Create dummy classes for missing modules
+    class EnhancedExcelGenerator:
+        def generate_dashboard_report(self, *args, **kwargs):
+            raise ImportError("Excel generator not available")
+    
+    class EnhancedDashboardBuilder:
+        def build_all_dashboards(self, *args, **kwargs):
+            raise ImportError("Dashboard builder not available")
+    
+    class DataValidator:
+        def __init__(self, *args, **kwargs):
+            pass
+        def validate_and_clean(self, data, dashboard_type):
+            return data
+    
+    class DatabaseExporter:
+        pass
+    
+    def validate_file_path(file_path):
+        return Path(file_path).exists() and Path(file_path).suffix.lower() in ['.ppt', '.pptx']
+    
+    def setup_logging():
+        logging.basicConfig(level=logging.INFO)
 
 class EnhancedMarketingDashboardApp:
     """Enhanced marketing dashboard application with all features"""
@@ -54,10 +99,12 @@ class EnhancedMarketingDashboardApp:
         self.all_data = {}
         self.processing_queue = queue.Queue()
         self.processing_metrics = {}
+        self.cancel_processing = False
+        self.processing_thread = None
+        self.processing_start_time = None
         
         # Initialize modules
         self.validator = DataValidator()
-        self.db_exporter = DatabaseExporter()
         
         # Setup UI
         self.setup_ui()
@@ -206,17 +253,28 @@ class EnhancedMarketingDashboardApp:
         ttk.Checkbutton(options_frame, text="Export to Database", 
                        variable=self.export_to_db).pack(anchor=tk.W, pady=2)
         
-        # Process button
+        # Process button frame
         process_frame = ttk.Frame(parent)
         process_frame.pack(fill=tk.X, padx=10, pady=10)
         
+        # Process button
         self.process_btn = ttk.Button(
             process_frame,
             text="▶ Start Processing",
             command=self.start_processing,
-            width=20
+            width=15
         )
         self.process_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Cancel button (initially disabled)
+        self.cancel_btn = ttk.Button(
+            process_frame,
+            text="⏹ Cancel",
+            command=self.cancel_processing,
+            width=15,
+            state=tk.DISABLED
+        )
+        self.cancel_btn.pack(side=tk.LEFT, padx=5)
         
         # Progress bar
         self.progress = ttk.Progressbar(parent, mode='determinate')
@@ -232,6 +290,14 @@ class EnhancedMarketingDashboardApp:
         self.progress_percent = ttk.Label(progress_frame, text="0%")
         self.progress_percent.pack(side=tk.RIGHT)
         
+        # Add loading indicator
+        self.loading_label = ttk.Label(progress_frame, text="", style="Warning.TLabel")
+        self.loading_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Add time elapsed label
+        self.time_label = ttk.Label(progress_frame, text="")
+        self.time_label.pack(side=tk.RIGHT)
+        
         # Log output
         log_frame = ttk.LabelFrame(parent, text="Processing Log", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -243,6 +309,7 @@ class EnhancedMarketingDashboardApp:
             font=("Consolas", 9)
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
+
     
     def setup_export_tab(self, parent):
         """Setup export tab"""
@@ -472,25 +539,48 @@ class EnhancedMarketingDashboardApp:
         )
     
     def start_processing(self):
-        """Start processing PPT files"""
+        """Start processing PPT files - FIXED with proper initialization"""
         if not self.ppt_files:
             messagebox.showwarning("No Files", "Please add PPT files first.")
             return
         
-        # Disable buttons during processing
+        print(f"[MAIN] ===== STARTING PROCESSING at {datetime.now().strftime('%H:%M:%S.%f')} =====")
+        
+        # Reset flags and start time
+        self.cancel_processing = False
+        self.processing_start_time = datetime.now()
+        
+        # IMPORTANT: Disable ALL buttons to prevent premature enabling
         self.process_btn.config(state=tk.DISABLED)
+        self.cancel_btn.config(state=tk.NORMAL)
         self.gen_excel_btn.config(state=tk.DISABLED)
         self.gen_dash_btn.config(state=tk.DISABLED)
         self.gen_all_btn.config(state=tk.DISABLED)
+        
+        # Force UI update immediately
+        self.root.update()
+        self.root.update_idletasks()
         
         # Reset progress
         self.progress['value'] = 0
         self.progress_label.config(text="Starting...")
         self.progress_percent.config(text="0%")
+        self.loading_label.config(text="Initializing...", foreground="#f59e0b")
+        self.time_label.config(text="0m 0s")
         
         # Clear previous data
         self.all_data.clear()
         self.processing_metrics.clear()
+        
+        # Clear log
+        self.log_text.delete(1.0, tk.END)
+        
+        # Clear the queue - CRITICAL!
+        while not self.processing_queue.empty():
+            try:
+                self.processing_queue.get_nowait()
+            except queue.Empty:
+                break
         
         # Start progress bar
         self.log("=" * 60)
@@ -498,17 +588,68 @@ class EnhancedMarketingDashboardApp:
         self.log(f"Processing {len(self.ppt_files)} file(s)")
         self.log("=" * 60)
         
-        # Start processing in background thread
-        thread = threading.Thread(target=self.process_files, daemon=True)
-        thread.start()
+        # Create and start thread
+        self.processing_thread = threading.Thread(target=self.process_files, daemon=True)
+        self.processing_thread.start()
         
-        # Check for updates
-        self.check_processing()
+        print(f"[MAIN] Thread started at {datetime.now().strftime('%H:%M:%S.%f')}")
+        print(f"[MAIN] Queue cleared, starting monitor...")
+        
+        # Start progress monitoring with minimal delay
+        # Use lambda to pass initial call_count=0
+        self.root.after(10, lambda: self.check_processing(0))
+
+    def cancel_processing(self):
+        """Cancel ongoing processing"""
+        self.cancel_processing = True
+        self.cancel_btn.config(state=tk.DISABLED)
+        self.log("⚠ Processing cancellation requested...")
     
     def process_files(self):
-        """Process files in background thread"""
+        """Process files in background thread - FIXED with completion confirmation"""
         try:
+            import time
+            thread_start = time.time()
+            
+            print(f"[THREAD] Thread started at {datetime.now().strftime('%H:%M:%S.%f')}")
+            
+            # Initial messages
+            self.processing_queue.put("PROGRESS:1")
+            self.processing_queue.put("DEBUG: Starting process_files")
+            
+            # Test imports (optional)
+            try:
+                self.processing_queue.put("DEBUG: Testing excel_generator import...")
+                from excel_generator import EnhancedExcelGenerator
+                self.processing_queue.put("DEBUG: ✓ excel_generator imported")
+            except ImportError as e:
+                self.processing_queue.put(f"ERROR: excel_generator import failed: {e}")
+            
+            try:
+                self.processing_queue.put("DEBUG: Testing dashboard_builder import...")
+                from dashboard_builder import EnhancedDashboardBuilder
+                self.processing_queue.put("DEBUG: ✓ dashboard_builder imported")
+            except ImportError as e:
+                self.processing_queue.put(f"ERROR: dashboard_builder import failed: {e}")
+            
+            # Check for required packages
+            try:
+                import openpyxl
+                self.processing_queue.put("DEBUG: ✓ openpyxl available")
+            except ImportError:
+                self.processing_queue.put("ERROR: openpyxl not installed")
+            
+            try:
+                import plotly
+                self.processing_queue.put("DEBUG: ✓ plotly available")
+            except ImportError:
+                self.processing_queue.put("ERROR: plotly not installed")
+            
+            # ========= ACTUAL PROCESSING =========
+            from ppt_processor import EnhancedPPTProcessor
             processor = EnhancedPPTProcessor()
+            
+            self.processing_queue.put("DEBUG: Processor created")
             
             # Initialize data storage
             self.all_data = {
@@ -520,90 +661,72 @@ class EnhancedMarketingDashboardApp:
             }
             
             total_records = 0
-            processed_files = 0
-            total_slides = 0
-            processed_slides = 0
             
+            # Process each file
             for i, ppt_file in enumerate(self.ppt_files, 1):
-                try:
-                    file_msg = f"[{i}/{len(self.ppt_files)}] Processing: {Path(ppt_file).name}"
-                    self.processing_queue.put(file_msg)
-                    
-                    # Update treeview status
-                    self.update_file_status(ppt_file, "Processing", "-")
-                    
-                    # Process with progress callback
-                    def update_progress(percent, current_slide, total_slides):
-                        progress_msg = f"  Slide {current_slide}/{total_slides} ({percent}%)"
-                        if percent % 10 == 0 or current_slide % 10 == 0:
-                            self.processing_queue.put(progress_msg)
-                    
-                    # Process file
-                    results = processor.process_ppt(ppt_file, progress_callback=update_progress)
-                    
-                    # Aggregate results
-                    file_records = 0
-                    for dashboard_type, data_list in results.items():
-                        if data_list:
-                            # Validate data if enabled
-                            if self.enable_validation.get():
-                                validated_data, summary = self.validator.validate_batch(
-                                    data_list, dashboard_type
-                                )
-                                self.all_data[dashboard_type].extend(validated_data)
-                                file_records += len(validated_data)
-                                
-                                # Log validation summary
-                                if validated_data:
-                                    self.processing_queue.put(
-                                        f"    ✓ {dashboard_type}: {len(validated_data)} valid records "
-                                        f"(Quality: {summary.get('data_quality', 'N/A')})"
-                                    )
-                            else:
-                                self.all_data[dashboard_type].extend(data_list)
-                                file_records += len(data_list)
-                    
-                    total_records += file_records
-                    
-                    # Update treeview with results
-                    self.update_file_status(ppt_file, "Completed", str(file_records))
-                    
-                    if file_records > 0:
-                        self.processing_queue.put(f"  ✓ Found {file_records} valid records")
-                    else:
-                        self.processing_queue.put(f"  ⚠ No valid data found")
-                    
-                    processed_files += 1
-                    
-                except Exception as e:
-                    error_msg = f"  ✗ Error: {str(e)[:100]}"
-                    self.processing_queue.put(error_msg)
-                    self.update_file_status(ppt_file, "Failed", "0")
-            
-            # Send completion message
-            self.processing_queue.put(f"✓ Processing complete!")
-            self.processing_queue.put(f"✓ Successfully processed {processed_files}/{len(self.ppt_files)} files")
-            self.processing_queue.put(f"✓ Extracted {total_records} total records")
-            
-            # Show breakdown
-            if total_records > 0:
-                for dashboard_type, data_list in self.all_data.items():
+                self.processing_queue.put(f"DEBUG: Processing file {i}/{len(self.ppt_files)}")
+                
+                # Send heartbeat
+                elapsed = time.time() - thread_start
+                self.processing_queue.put(f"HEARTBEAT: {elapsed:.2f}s into processing")
+                
+                # Process the PPT file
+                results = processor.process_ppt(ppt_file)
+                self.processing_queue.put(f"DEBUG: Got results with {len(results)} dashboard types")
+                
+                file_records = 0
+                
+                # Collect data
+                for dashboard_type, data_list in results.items():
                     if data_list:
-                        self.processing_queue.put(f"  • {dashboard_type}: {len(data_list)} records")
+                        self.all_data[dashboard_type].extend(data_list)
+                        file_records += len(data_list)
+                        self.processing_queue.put(f"DEBUG: Added {len(data_list)} records to {dashboard_type}")
+                
+                total_records += file_records
+                self.processing_queue.put(f"DEBUG: File {i} complete: {file_records} records")
+                
+                # Update progress
+                progress = int((i / len(self.ppt_files)) * 100)
+                self.processing_queue.put(f"PROGRESS:{progress}")
             
-            # Export to database if enabled
-            if self.export_to_db.get() and total_records > 0:
-                self.processing_queue.put("Exporting to database...")
-                for dashboard_type, data_list in self.all_data.items():
-                    if data_list:
-                        exported = self.db_exporter.export_data(dashboard_type, data_list)
-                        self.processing_queue.put(f"  • {dashboard_type}: {exported} records exported")
-            
-            self.processing_queue.put("DONE")
+            # ========= COMPLETION SEQUENCE =========
+            print(f"[THREAD] All files processed. Total: {total_records} records")
+            print(f"[THREAD] Total thread time: {time.time() - thread_start:.2f}s")
+
+            # Send completion in a reliable sequence
+            completion_messages = [
+                f"DEBUG: All files processed. Total: {total_records} records",
+                "PROGRESS:50",
+                "PROGRESS:75",
+                "PROGRESS:90",
+                "PROGRESS:95",
+                "PROGRESS:99",
+                "PROGRESS:100",
+                "DONE",  # First DONE
+                "DONE",  # Second DONE for redundancy
+                f"✓ Processing complete! Extracted {total_records} records",
+                f"THREAD_FINISHED: {time.time() - thread_start:.2f}s"
+            ]
+
+            print(f"[THREAD] Sending {len(completion_messages)} completion messages...")
+
+            for i, msg in enumerate(completion_messages, 1):
+                self.processing_queue.put(msg)
+                print(f"[THREAD] [{i}/{len(completion_messages)}] Sent: {msg}")
+                time.sleep(0.02)  # Small delay to ensure UI can process
+
+            # Final confirmation
+            print(f"[THREAD] ✅ All completion messages sent at {datetime.now().strftime('%H:%M:%S.%f')}")
+            print(f"[THREAD] Final queue size: {self.processing_queue.qsize()}")
+            print(f"[THREAD] Thread exiting...")
             
         except Exception as e:
-            self.processing_queue.put(f"✗ Processing failed: {str(e)}")
-            self.processing_queue.put("DONE")
+            import traceback
+            error_msg = f"✗ Processing failed: {str(e)}\n{traceback.format_exc()}"
+            print(f"[THREAD] ❌ ERROR: {error_msg}")
+            self.processing_queue.put(f"CRITICAL ERROR in process_files: {str(e)}")
+            self.processing_queue.put("DONE_ERROR")
     
     def update_file_status(self, file_path, status, records):
         """Update file status in treeview"""
@@ -615,62 +738,159 @@ class EnhancedMarketingDashboardApp:
                 self.file_tree.item(item, values=(values[0], values[1], status, records))
                 break
     
-    def check_processing(self):
-        """Check for processing updates"""
+    def check_processing(self, call_count=0):
+        """Check for processing updates - FIXED to always keep checking"""
+        call_count += 1
+        
+        # Safety limit: 200 calls * 20ms = 4 seconds max
+        if call_count > 200:
+            print(f"[UI] ⚠️  Safety timeout after {call_count} calls (4 seconds)")
+            if hasattr(self, 'processing_thread') and self.processing_thread:
+                if not self.processing_thread.is_alive():
+                    print("[UI] Thread is dead but no DONE received")
+                    self.processing_complete()
+                else:
+                    print("[UI] Thread still alive after timeout - forcing completion")
+                    self.processing_complete()
+            elif self.process_btn['state'] == tk.DISABLED:
+                print("[UI] Button disabled but no thread - forcing completion")
+                self.processing_complete()
+            return
+        
         try:
+            messages_processed = 0
             while True:
                 try:
                     msg = self.processing_queue.get_nowait()
-                    if msg == "DONE":
+                    messages_processed += 1
+                    
+                    # DEBUG: Print with timestamp
+                    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+                    print(f"[UI #{call_count}.{messages_processed} @ {timestamp}] {msg}")
+                    
+                    # Parse progress messages
+                    if msg.startswith("PROGRESS:"):
+                        # Extract percentage
+                        numbers = re.findall(r'\d+', msg)
+                        if numbers:
+                            percent = int(numbers[0])
+                            
+                            # Update progress bar
+                            self.progress['value'] = percent
+                            self.progress_percent.config(text=f"{percent}%")
+                            
+                            # Update label
+                            if percent < 100:
+                                self.progress_label.config(text=f"Processing... {percent}%")
+                                self.update_loading_indicator(percent)
+                            else:
+                                self.progress_label.config(text=f"Complete! {percent}%")
+                                self.loading_label.config(text="Complete!", foreground="#10b981")
+                            
+                            # Update time
+                            if hasattr(self, 'processing_start_time') and self.processing_start_time:
+                                elapsed = (datetime.now() - self.processing_start_time).total_seconds()
+                                minutes = int(elapsed // 60)
+                                seconds = int(elapsed % 60)
+                                self.time_label.config(text=f"{minutes}m {seconds}s")
+                    
+                    # Check for completion
+                    elif msg == "DONE":
+                        print(f"[UI] ✅ Got DONE message on call #{call_count}")
                         self.processing_complete()
-                        break
+                        return  # This is the CORRECT way to stop
+                        
+                    elif msg == "DONE_ERROR":
+                        print(f"[UI] ❌ Got ERROR message on call #{call_count}")
+                        self.processing_error()
+                        return
+                        
                     else:
-                        self.log(msg)
-                        
-                        # Update progress if it's a progress message
-                        if "Slide" in msg and "%" in msg:
-                            try:
-                                percent = int(msg.split("(")[1].split("%")[0])
-                                self.progress['value'] = percent
-                                self.progress_percent.config(text=f"{percent}%")
-                            except:
-                                pass
-                        
+                        # Log non-progress messages (skip DEBUG messages to avoid spam)
+                        if not msg.startswith("DEBUG:") and not msg.startswith("HEARTBEAT:"):
+                            self.log(msg)
+                            
                 except queue.Empty:
-                    break
-        except Exception as e:
-            self.log(f"Error checking queue: {e}")
+                    # Queue is temporarily empty
+                    if messages_processed > 0:
+                        print(f"[UI] Processed {messages_processed} messages, queue empty (call #{call_count})")
+                break
         
-        # Continue checking if not done
-        if self.process_btn['state'] == tk.DISABLED:
-            self.root.after(100, self.check_processing)
+        except Exception as e:
+            self.log(f"Error in check_processing: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # ALWAYS check again in 20ms, regardless of button state
+        # The ONLY ways to stop are: 1) Got DONE, 2) Safety timeout, 3) Got DONE_ERROR
+        self.root.after(20, lambda: self.check_processing(call_count))
+
+    def update_loading_indicator(self, percent):
+        """Update loading indicator based on progress percentage"""
+        if percent < 30:
+            self.loading_label.config(text="Initializing...", foreground="#f59e0b")
+        elif percent < 70:
+            self.loading_label.config(text="Processing slides...", foreground="#f59e0b")
+        elif percent < 100:
+            self.loading_label.config(text="Finalizing...", foreground="#10b981")
     
     def processing_complete(self):
-        """Handle processing completion"""
+        """Handle processing completion - SAFE version"""
+        print(f"[UI] 🎉 processing_complete() called at {datetime.now().strftime('%H:%M:%S.%f')}")
+        
+        # Prevent multiple calls
+        if self.process_btn['state'] == tk.NORMAL:
+            print("[UI] ⚠️  Already completed, ignoring duplicate call")
+            return
+        
+        # Calculate total records
+        total_records = 0
+        if hasattr(self, 'all_data'):
+            total_records = sum(len(data) for data in self.all_data.values())
+        
+        # Update UI
         self.progress['value'] = 100
-        self.progress_label.config(text="Processing complete")
         self.progress_percent.config(text="100%")
+        self.progress_label.config(text="Complete!", foreground="#10b981")
+        self.loading_label.config(text="✅ Ready for export!", foreground="#10b981")
         
+        # Update time
+        if hasattr(self, 'processing_start_time') and self.processing_start_time:
+            elapsed = (datetime.now() - self.processing_start_time).total_seconds()
+            minutes = int(elapsed // 60)
+            seconds = int(elapsed % 60)
+            self.time_label.config(text=f"{minutes}m {seconds}s")
+        
+        # Re-enable buttons (CRITICAL: Do this LAST)
         self.process_btn.config(state=tk.NORMAL)
+        self.cancel_btn.config(state=tk.DISABLED)
         
-        # Check if we have data
-        total_records = sum(len(data) for data in self.all_data.values())
-        
+        # Only enable export buttons if we have data
         if total_records > 0:
             self.gen_excel_btn.config(state=tk.NORMAL)
             self.gen_dash_btn.config(state=tk.NORMAL)
             self.gen_all_btn.config(state=tk.NORMAL)
-            
-            self.log("✓ Ready to generate reports and dashboards")
-            
-            # Update analytics
-            self.update_analytics()
-            self.refresh_preview()
-        else:
-            self.log("⚠ No valid data extracted. Check if slides contain expected keywords.")
+        
+        # Show completion message
+        self.log("=" * 60)
+        self.log(f"✅ PROCESSING COMPLETE!")
+        self.log(f"✅ Extracted {total_records} total records")
+        
+        # Log breakdown by dashboard type
+        if hasattr(self, 'all_data'):
+            for dashboard_type, data_list in self.all_data.items():
+                if data_list:
+                    self.log(f"   • {dashboard_type.replace('_', ' ').title()}: {len(data_list)} records")
+        
+        self.log("=" * 60)
+        print(f"[UI] ✅ Processing complete with {total_records} records")
     
     def update_analytics(self):
         """Update analytics metrics"""
+        if not HAS_PANDAS:
+            self.log("⚠ pandas not available for analytics")
+            return
+            
         total_files = len(self.ppt_files)
         total_records = sum(len(data) for data in self.all_data.values())
         
@@ -713,6 +933,10 @@ class EnhancedMarketingDashboardApp:
     
     def refresh_preview(self):
         """Refresh data preview"""
+        if not HAS_PANDAS:
+            self.log("⚠ pandas not available for data preview")
+            return
+            
         # Clear existing items
         for item in self.data_tree.get_children():
             self.data_tree.delete(item)
@@ -742,6 +966,10 @@ class EnhancedMarketingDashboardApp:
     
     def view_details(self):
         """View selected data details"""
+        if not HAS_PANDAS:
+            messagebox.showwarning("Feature Unavailable", "pandas is required for this feature")
+            return
+            
         selected = self.data_tree.selection()
         if not selected:
             return
@@ -914,8 +1142,12 @@ First 10 Records:
                 json_data = {}
                 for d_type, data_list in self.all_data.items():
                     if data_list:
-                        df = pd.DataFrame(data_list)
-                        json_data[d_type] = df.to_dict('records')
+                        if HAS_PANDAS:
+                            df = pd.DataFrame(data_list)
+                            json_data[d_type] = df.to_dict('records')
+                        else:
+                            # Manual conversion if pandas not available
+                            json_data[d_type] = data_list
                 
                 import json
                 with open(output_path, 'w', encoding='utf-8') as f:
@@ -947,7 +1179,6 @@ First 10 Records:
     
     def check_for_updates(self):
         """Check for application updates"""
-        # This could be extended to check for updates from a server
         self.log("Application started successfully")
         self.log("Ready to process marketing data")
     

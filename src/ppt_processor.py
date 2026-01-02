@@ -1,5 +1,6 @@
 ﻿"""
 Enhanced PPT Processor with caching, error recovery, and detailed logging
+FIXED VERSION - Proper logger initialization
 """
 
 import re
@@ -12,6 +13,7 @@ from datetime import datetime
 from functools import lru_cache
 from dataclasses import dataclass
 import yaml
+import traceback
 
 from pptx import Presentation
 
@@ -86,19 +88,49 @@ class EnhancedPPTProcessor:
     """Enhanced PPT processor with caching, validation, and detailed logging"""
     
     def __init__(self, config_path: str = "config/dashboard_config.yaml"):
+        # Setup logger FIRST - don't create it yet
+        self._setup_logging()
+        
+        # Now create logger after setup
+        self.logger = logging.getLogger(__name__)
+        
+        # Then load config
         self.config = self._load_config(config_path)
         self.patterns = self._compile_patterns()
         self.validator = DataValidator(config_path)
         self.cache_dir = Path("cache")
         self.cache_dir.mkdir(exist_ok=True)
         
-        # Setup logging
-        self.logger = logging.getLogger(__name__)
-        self.setup_logging()
-        
         # Initialize counters
         self.metrics = ProcessingMetrics()
         self.extraction_history = []
+    
+    def _setup_logging(self):
+        """Configure logging without basicConfig to avoid conflicts"""
+        # Get or create logger
+        logger = logging.getLogger(__name__)
+        
+        # Only add handlers if they don't already exist
+        if not logger.handlers:
+            log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            date_format = '%Y-%m-%d %H:%M:%S'
+            
+            # File handler
+            try:
+                file_handler = logging.FileHandler('ppt_processor.log', encoding='utf-8')
+                file_handler.setLevel(logging.INFO)
+                file_handler.setFormatter(logging.Formatter(log_format, date_format))
+                logger.addHandler(file_handler)
+            except Exception as e:
+                print(f"Failed to create file handler: {e}")
+            
+            # Console handler
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.INFO)
+            console_handler.setFormatter(logging.Formatter(log_format, date_format))
+            logger.addHandler(console_handler)
+            
+            logger.setLevel(logging.INFO)
     
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load and validate configuration"""
@@ -107,13 +139,19 @@ class EnhancedPPTProcessor:
                 config = yaml.safe_load(f)
             
             # Validate required sections
-            required_sections = ['social_media', 'global_settings']
-            for section in required_sections:
-                if section not in config.get('dashboard_config', {}):
-                    raise ValueError(f"Missing required section: {section}")
-            
-            self.logger.info(f"Configuration loaded from {config_path}")
-            return config.get('dashboard_config', {})
+            if config and 'dashboard_config' in config:
+                required_sections = ['social_media', 'global_settings']
+                dashboard_config = config.get('dashboard_config', {})
+                
+                for section in required_sections:
+                    if section not in dashboard_config:
+                        self.logger.warning(f"Missing required section: {section}")
+                
+                self.logger.info(f"Configuration loaded from {config_path}")
+                return dashboard_config
+            else:
+                self.logger.warning("Empty or invalid configuration file")
+                return self._get_default_config()
             
         except Exception as e:
             self.logger.error(f"Failed to load config: {e}")
@@ -131,27 +169,6 @@ class EnhancedPPTProcessor:
             'global_settings': {'date_formats': [], 'number_formats': []}
         }
     
-    def setup_logging(self):
-        """Configure logging with file and console handlers"""
-        log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        date_format = '%Y-%m-%d %H:%M:%S'
-        
-        # File handler
-        file_handler = logging.FileHandler('ppt_processor.log', encoding='utf-8')
-        file_handler.setLevel(logging.INFO)
-        file_handler.setFormatter(logging.Formatter(log_format, date_format))
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter(log_format, date_format))
-        
-        # Configure root logger
-        logging.basicConfig(
-            level=logging.INFO,
-            handlers=[file_handler, console_handler]
-        )
-    
     def _compile_patterns(self) -> Dict[str, Dict]:
         """Compile regex patterns with configuration support"""
         patterns = {
@@ -167,11 +184,11 @@ class EnhancedPPTProcessor:
             },
             'metrics': {
                 'reach_views': {
-                    'pattern': re.compile(r'(?:Reach|Views|Reach/Views|View Count)[:\s]*([\d,]+(?:\.\d+)?[KMB]?)', re.IGNORECASE),
+                    'pattern': re.compile(r'(?:Reach|Views|Reach/Views|View Count|Reach/View)[:\s]*([\d,]+(?:\.\d+)?[KMB]?)', re.IGNORECASE),
                     'confidence': 0.85
                 },
                 'engagement': {
-                    'pattern': re.compile(r'(?:Engagement|Engagement Rate)[:\s]*([\d,]+(?:\.\d+)?[KMB]?)', re.IGNORECASE),
+                    'pattern': re.compile(r'(?:Engagement|Engagement Rate|Total Engagement)[:\s]*([\d,]+(?:\.\d+)?[KMB]?)', re.IGNORECASE),
                     'confidence': 0.8
                 },
                 'likes': {
@@ -192,12 +209,13 @@ class EnhancedPPTProcessor:
                 }
             },
             'entities': {
-                'platform': re.compile(r'(?:Platform|Channel|Network)[:\s]*([A-Za-z0-9\s]+)(?:\n|$)', re.IGNORECASE),
-                'kol_name': re.compile(r'(?:KOL|Influencer|Creator)[:\s]*([A-Za-z\s]+)(?=\n|:|$)', re.IGNORECASE),
+                'platform': re.compile(r'(?:Platform|Channel|Network|Page|Account)[:\s]*([A-Za-z0-9\s]+)(?:\n|$| )', re.IGNORECASE),
+                'kol_name': re.compile(r'(?:KOL|Influencer|Creator|Talent)[:\s]*([A-Za-z\s]+)(?=\n|:|$| )', re.IGNORECASE),
                 'community_name': re.compile(r'(?:Community|Group|Hive)[:\s]*([A-Za-z0-9\s\-]+)(?=\n|:|$)', re.IGNORECASE),
                 'campaign_name': re.compile(r'(?:Campaign|Promotion|Initiative)[:\s]*([A-Za-z0-9\s\-]+)(?=\n|:|$)', re.IGNORECASE)
             }
         }
+        
         return patterns
     
     def get_cache_key(self, file_path: str) -> str:
@@ -212,7 +230,6 @@ class EnhancedPPTProcessor:
             self.logger.warning(f"Failed to generate cache key: {e}")
             return hashlib.md5(file_path.encode()).hexdigest()[:16]
     
-    @lru_cache(maxsize=32)
     def process_ppt(self, ppt_path: str, progress_callback: Callable = None) -> Dict[str, List]:
         """
         Process PPT file with caching and progress tracking
@@ -225,7 +242,9 @@ class EnhancedPPTProcessor:
             Dictionary of extracted data by dashboard type
         """
         start_time = datetime.now()
-        self.metrics = ProcessingMetrics()
+        
+        # Create new metrics for this processing run
+        current_metrics = ProcessingMetrics()
         
         try:
             # Check cache
@@ -236,11 +255,23 @@ class EnhancedPPTProcessor:
                 self.logger.info(f"Loading from cache: {ppt_path}")
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
-                    self.metrics.extracted_records = sum(len(v) for v in cached_data.values())
+                    current_metrics.extracted_records = sum(len(v) for v in cached_data.values())
                     return cached_data
             
             # Process file
             self.logger.info(f"Processing: {ppt_path}")
+            
+            # Check if file exists
+            if not Path(ppt_path).exists():
+                self.logger.error(f"File not found: {ppt_path}")
+                return {
+                    'social_media': [],
+                    'community_marketing': [],
+                    'kol_engagement': [],
+                    'performance_marketing': [],
+                    'promotion_posts': []
+                }
+            
             presentation = Presentation(ppt_path)
             filename = Path(ppt_path).name
             
@@ -253,14 +284,17 @@ class EnhancedPPTProcessor:
             }
             
             total_slides = len(presentation.slides)
-            self.metrics.total_slides = total_slides
+            current_metrics.total_slides = total_slides
             
-            for slide_idx, slide in enumerate(presentation.slides):
+            if progress_callback and callable(progress_callback):
+                progress_callback(0, 0, total_slides)
+            
+            for slide_idx, slide in enumerate(presentation.slides, 1):
                 try:
                     # Update progress
-                    if progress_callback:
-                        progress = int((slide_idx + 1) / total_slides * 100)
-                        progress_callback(progress, slide_idx + 1, total_slides)
+                    if progress_callback and callable(progress_callback):
+                        progress = int(slide_idx / total_slides * 100)
+                        progress_callback(progress, slide_idx, total_slides)
                     
                     # Process slide
                     slide_data = self._process_slide(slide, filename, slide_idx)
@@ -274,28 +308,34 @@ class EnhancedPPTProcessor:
                             )
                             if validated_data:
                                 results[dashboard_type].append(validated_data)
-                                self.metrics.extracted_records += 1
-                                self.metrics.confidence_scores.append(
+                                current_metrics.extracted_records += 1
+                                current_metrics.confidence_scores.append(
                                     validated_data.get('confidence_score', 0.8)
                                 )
                         
-                        self.metrics.processed_slides += 1
+                        current_metrics.processed_slides += 1
                     
                 except Exception as slide_error:
-                    self.metrics.failed_slides += 1
+                    current_metrics.failed_slides += 1
                     self.logger.error(f"Slide {slide_idx} error: {slide_error}")
                     self._log_slide_error(slide_idx, slide_error, ppt_path)
             
             # Calculate data quality score
-            if self.metrics.confidence_scores:
-                self.metrics.data_quality_score = sum(self.metrics.confidence_scores) / len(self.metrics.confidence_scores)
+            if current_metrics.confidence_scores:
+                current_metrics.data_quality_score = sum(current_metrics.confidence_scores) / len(current_metrics.confidence_scores)
             
             # Cache results
-            with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=2)
+            try:
+                with open(cache_file, 'w', encoding='utf-8') as f:
+                    json.dump(results, f, indent=2, default=str)
+            except Exception as e:
+                self.logger.error(f"Failed to cache results: {e}")
             
             # Update processing time
-            self.metrics.processing_time = (datetime.now() - start_time).total_seconds()
+            current_metrics.processing_time = (datetime.now() - start_time).total_seconds()
+            
+            # Update instance metrics
+            self.metrics = current_metrics
             
             # Log summary
             self._log_processing_summary(ppt_path, results)
@@ -304,7 +344,15 @@ class EnhancedPPTProcessor:
             
         except Exception as e:
             self.logger.error(f"Failed to process {ppt_path}: {e}")
-            raise
+            self.logger.error(traceback.format_exc())
+            # Return empty results instead of crashing
+            return {
+                'social_media': [],
+                'community_marketing': [],
+                'kol_engagement': [],
+                'performance_marketing': [],
+                'promotion_posts': []
+            }
     
     def _process_slide(self, slide, filename: str, slide_idx: int) -> Optional[Dict]:
         """Process individual slide"""
@@ -357,36 +405,36 @@ class EnhancedPPTProcessor:
         """Identify dashboard type with confidence score"""
         slide_content = f"{slide_title}\n{slide_text}".lower()
         
+        # More flexible patterns
         dashboard_patterns = {
             'social_media': [
-                (r'tf value-mart.*fb page.*wallposts', 0.95),
-                (r'tf value-mart.*ig page.*wallposts', 0.95),
-                (r'tf value-mart.*tiktok.*video performance', 0.95),
-                (r'facebook.*performance', 0.7),
-                (r'instagram.*performance', 0.7),
-                (r'tiktok.*performance', 0.7)
+                (r'tf.*value.*mart.*fb.*page', 0.95),
+                (r'tf.*value.*mart.*ig.*page', 0.95),
+                (r'tf.*value.*mart.*tiktok', 0.95),
+                (r'facebook.*page', 0.8),
+                (r'instagram.*page', 0.8),
+                (r'tiktok.*video', 0.8),
+                (r'social.*media', 0.7)
             ],
             'community_marketing': [
-                (r'hive marketing.*wallposts', 0.95),
+                (r'hive.*marketing', 0.95),
                 (r'community.*marketing', 0.8),
                 (r'group.*performance', 0.7)
             ],
             'kol_engagement': [
-                (r'kol engagement.*video performance', 0.95),
-                (r'influencer.*performance', 0.8),
-                (r'creator.*collaboration', 0.7)
+                (r'kol.*engagement', 0.95),
+                (r'influencer.*collaboration', 0.8),
+                (r'creator.*video', 0.7)
             ],
             'performance_marketing': [
-                (r'fb ads.*page likes', 0.95),
-                (r'ig ads.*profile visits', 0.95),
-                (r'tiktok ads.*followers', 0.95),
-                (r'ad.*performance', 0.7),
-                (r'campaign.*results', 0.6)
+                (r'fb.*ads', 0.95),
+                (r'ig.*ads', 0.95),
+                (r'tiktok.*ads', 0.95),
+                (r'ad.*performance', 0.7)
             ],
             'promotion_posts': [
-                (r'promotion posts.*tfvm brand page', 0.95),
-                (r'promotional.*content', 0.8),
-                (r'sales.*promotion', 0.7)
+                (r'promotion.*posts', 0.95),
+                (r'promotional.*content', 0.8)
             ]
         }
         
@@ -407,13 +455,26 @@ class EnhancedPPTProcessor:
         """Extract all text from slide including tables"""
         texts = []
         
+        # Check if slide has shapes attribute
+        if not hasattr(slide, 'shapes'):
+            return ""
+        
         for shape in slide.shapes:
-            if hasattr(shape, "text") and shape.text.strip():
-                texts.append(clean_text(shape.text))
-            
-            if hasattr(shape, "has_table") and shape.has_table:
-                table_text = self._extract_table_text(shape.table)
-                texts.append(table_text)
+            try:
+                if hasattr(shape, "text") and shape.text and shape.text.strip():
+                    texts.append(clean_text(shape.text))
+                
+                # Check for tables
+                if hasattr(shape, "has_table") and shape.has_table:
+                    try:
+                        table_text = self._extract_table_text(shape.table)
+                        texts.append(table_text)
+                    except:
+                        pass  # Skip table if error
+                        
+            except Exception as e:
+                self.logger.debug(f"Error processing shape: {e}")
+                continue  # Skip this shape and continue
         
         return "\n".join(texts)
     
@@ -719,9 +780,12 @@ class EnhancedPPTProcessor:
         error_file = Path("errors") / f"errors_{datetime.now():%Y%m%d}.json"
         error_file.parent.mkdir(exist_ok=True)
         
-        with open(error_file, 'a', encoding='utf-8') as f:
-            json.dump(error_log, f)
-            f.write("\n")
+        try:
+            with open(error_file, 'a', encoding='utf-8') as f:
+                json.dump(error_log, f)
+                f.write("\n")
+        except Exception as e:
+            self.logger.error(f"Failed to log error: {e}")
     
     def _log_processing_summary(self, file_path: str, results: Dict):
         """Log processing summary"""

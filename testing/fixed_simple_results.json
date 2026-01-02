@@ -1,0 +1,38 @@
+{
+  "social_media": [
+    {
+      "slide": 9,
+      "category": "social_media",
+      "metrics": {
+        "engagement": 4.0
+      },
+      "text_preview": "TF VALUE-MART FB PAGE\nFEBRUARY 2025\nKOL TikTok \u2013 Nina Cucur Udang Rangup [24/02]\nLoyalty Program (Go..."
+    },
+    {
+      "slide": 12,
+      "category": "social_media",
+      "metrics": {
+        "engagement": 4.0
+      },
+      "text_preview": "Loyalty Program (Gorme Omura Knife Series) [25/02]\nPromo Cahaya Ramadan\n[26/02]\nTF VALUE-MART IG PAG..."
+    }
+  ],
+  "community_marketing": [],
+  "kol_engagement": [],
+  "performance_marketing": [],
+  "promotion_posts": [
+    {
+      "slide": 79,
+      "category": "promotion_posts",
+      "metrics": {
+        "reach": 93349.0,
+        "engagement": 4147.0,
+        "likes": 538.0,
+        "shares": 16.0,
+        "comments": 5.0,
+        "saved": 3.0
+      },
+      "text_preview": "PROMOTION POSTS\nFEBRUARY 2025\nSelamat Hari Valentine\n[05/02]\nCahaya Ramadan\n[24/02]\nADS PERFORMANCE ..."
+    }
+  ]
+}

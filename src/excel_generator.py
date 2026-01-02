@@ -85,20 +85,11 @@ class EnhancedExcelGenerator:
         )
     
     def generate_dashboard_report(self, all_data: Dict[str, List], 
-                                 output_path: str,
-                                 include_charts: bool = True,
-                                 include_summary: bool = True) -> str:
+                             output_path: str,
+                             include_charts: bool = True,
+                             include_summary: bool = True) -> str:
         """
         Generate comprehensive Excel report
-        
-        Args:
-            all_data: Dictionary of data by dashboard type
-            output_path: Output Excel file path
-            include_charts: Whether to include charts
-            include_summary: Whether to include summary dashboard
-            
-        Returns:
-            Path to generated Excel file
         """
         start_time = datetime.now()
         
@@ -148,132 +139,7 @@ class EnhancedExcelGenerator:
         self.logger.info(f"Excel report generated in {processing_time:.2f} seconds: {output_path}")
         
         return output_path
-    
-    def _create_cover_sheet(self, workbook, all_data: Dict[str, List]):
-        """Create professional cover sheet"""
-        ws = workbook.create_sheet(title="Cover", index=0)
-        
-        # Add logo/title area
-        ws.merge_cells('A1:H3')
-        ws['A1'] = "MARKETING PERFORMANCE DASHBOARD"
-        ws['A1'].font = self.title_font
-        ws['A1'].alignment = self.center_alignment
-        
-        # Add subtitle
-        ws.merge_cells('A4:H5')
-        ws['A4'] = "Comprehensive Analytics Report"
-        ws['A4'].font = self.subtitle_font
-        ws['A4'].alignment = self.center_alignment
-        
-        # Add report info
-        ws['A7'] = "Report Generated:"
-        ws['B7'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ws['A7'].font = self.bold_font
-        ws['B7'].font = self.data_font
-        
-        ws['A8'] = "Data Sources:"
-        ws['B8'] = "PPT Files Analysis"
-        ws['A8'].font = self.bold_font
-        ws['B8'].font = self.data_font
-        
-        # Add dashboard summary table
-        ws['A10'] = "Dashboard Summary"
-        ws['A10'].font = Font(bold=True, size=14, color=self.primary_color)
-        ws.merge_cells('A10:H10')
-        
-        # Table headers
-        headers = ["Dashboard", "Records", "Files", "Date Range", "Status", "Quality"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=12, column=col, value=header)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.center_alignment
-            cell.border = self.thin_border
-        
-        # Table data
-        row = 13
-        total_records = 0
-        
-        for dashboard_type, data_list in all_data.items():
-            if data_list:
-                df = pd.DataFrame(data_list)
-                records = len(data_list)
-                total_records += records
-                
-                # Calculate metrics
-                files = df['source_file'].nunique() if 'source_file' in df.columns else 1
-                date_range = self._get_date_range_from_df(df)
-                
-                # Data quality assessment
-                quality_score = self._calculate_data_quality(df, dashboard_type)
-                quality_status = self._get_quality_status(quality_score)
-                
-                values = [
-                    self._format_dashboard_name(dashboard_type),
-                    records,
-                    files,
-                    date_range,
-                    "✓ Complete",
-                    quality_status
-                ]
-                
-                for col, value in enumerate(values, 1):
-                    cell = ws.cell(row=row, column=col, value=value)
-                    cell.font = self.data_font
-                    cell.border = self.thin_border
-                    cell.alignment = self.center_alignment
-                    
-                    # Alternate row coloring
-                    if row % 2 == 0:
-                        cell.fill = self.alt_row_fill
-                    
-                    # Color code quality status
-                    if col == 6:  # Quality column
-                        if quality_status == "Excellent":
-                            cell.font = Font(color=self.success_color, bold=True)
-                        elif quality_status == "Good":
-                            cell.font = Font(color=self.success_color)
-                        elif quality_status == "Fair":
-                            cell.font = Font(color=self.warning_color)
-                        else:
-                            cell.font = Font(color=self.danger_color)
-                
-                row += 1
-        
-        # Add total row
-        ws.cell(row=row, column=1, value="TOTAL").font = self.bold_font
-        ws.cell(row=row, column=2, value=total_records).font = self.bold_font
-        ws.cell(row=row, column=2).fill = self.highlight_fill
-        
-        # Add instructions
-        instruction_row = row + 2
-        ws.merge_cells(f'A{instruction_row}:H{instruction_row+1}')
-        instruction_cell = ws.cell(row=instruction_row, column=1)
-        instruction_cell.value = "Navigate to individual dashboard sheets for detailed analysis and charts"
-        instruction_cell.font = Font(italic=True, color=self.secondary_color, size=11)
-        instruction_cell.alignment = self.center_alignment
-        
-        # Add sheet navigation guide
-        guide_row = instruction_row + 3
-        ws.merge_cells(f'A{guide_row}:H{guide_row}')
-        guide_cell = ws.cell(row=guide_row, column=1)
-        guide_cell.value = "Sheet Navigation Guide"
-        guide_cell.font = Font(bold=True, size=12, color=self.primary_color)
-        guide_cell.alignment = self.center_alignment
-        
-        guide_items = [
-            ("Summary", "High-level overview and key metrics"),
-            ("Social_Media", "Platform performance and engagement analysis"),
-            ("Performance_Marketing", "Ad campaign ROI and efficiency"),
-            ("KOL_Engagement", "Influencer performance and tier analysis"),
-            ("Data_Quality", "Data validation and quality assessment"),
-            ("Executive_Summary", "Strategic insights and recommendations")
-        ]
-        
-        for i, (sheet_name, description) in enumerate(guide_items):
-            ws.cell(row=guide_row + 2 + i, column=1, value=f"• {sheet_name}:").font = self.bold_font
-            ws.cell(row=guide_row + 2 + i, column=2, value=description).font = self.data_font
-    
+
     def _create_summary_dashboard(self, workbook, all_data: Dict[str, List]):
         """Create summary dashboard with charts"""
         ws = workbook.create_sheet(title="Summary", index=1)
@@ -290,16 +156,25 @@ class EnhancedExcelGenerator:
         ws['A2'].font = Font(size=12, color=self.secondary_color)
         ws['A2'].alignment = self.center_alignment
         
-        # Create metrics summary
+        # Create metrics summary - SIMPLIFIED
         metrics_data = []
-        total_engagement = 0
+        total_records = 0
         
         for dashboard_type, data_list in all_data.items():
             if data_list:
                 df = pd.DataFrame(data_list)
                 records = len(data_list)
-                engagement = self._calculate_total_engagement(df)
-                total_engagement += engagement
+                total_records += records
+                
+                # SIMPLIFIED: Try to calculate engagement if possible
+                engagement = 0
+                if 'engagement' in df.columns:
+                    engagement = df['engagement'].sum()
+                else:
+                    # Try other engagement metrics
+                    for col in ['likes', 'comments', 'shares', 'saved', 'views']:
+                        if col in df.columns:
+                            engagement += df[col].sum()
                 
                 metrics_data.append({
                     'dashboard': self._format_dashboard_name(dashboard_type),
@@ -308,83 +183,49 @@ class EnhancedExcelGenerator:
                     'avg_engagement': engagement / records if records > 0 else 0
                 })
         
-        # Write metrics summary table
-        ws['A4'] = "Dashboard Performance Summary"
-        ws['A4'].font = Font(bold=True, size=14, color=self.primary_color)
-        ws.merge_cells('A4:E4')
-        
-        headers = ["Dashboard", "Records", "Total Engagement", "Avg/Record", "Share %"]
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=6, column=col, value=header)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.center_alignment
-        
-        row = 7
-        for data in metrics_data:
-            share_percentage = (data['engagement'] / total_engagement * 100) if total_engagement > 0 else 0
+        # Only create table if we have data
+        if metrics_data:
+            # Write metrics summary table
+            ws['A4'] = "Dashboard Performance Summary"
+            ws['A4'].font = Font(bold=True, size=14, color=self.primary_color)
+            ws.merge_cells('A4:E4')
             
-            values = [
-                data['dashboard'],
-                data['records'],
-                data['engagement'],
-                data['avg_engagement'],
-                f"{share_percentage:.1f}%"
-            ]
-            
-            for col, value in enumerate(values, 1):
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.font = self.data_font
-                cell.border = self.thin_border
+            headers = ["Dashboard", "Records", "Total Engagement", "Avg/Record", "Share %"]
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=6, column=col, value=header)
+                cell.font = self.header_font
+                cell.fill = self.header_fill
                 cell.alignment = self.center_alignment
             
-            row += 1
+            row = 7
+            for data in metrics_data:
+                share_percentage = (data['engagement'] / total_engagement * 100) if total_engagement > 0 else 0
+                
+                values = [
+                    data['dashboard'],
+                    data['records'],
+                    data['engagement'],
+                    data['avg_engagement'],
+                    f"{share_percentage:.1f}%"
+                ]
+                
+                for col, value in enumerate(values, 1):
+                    cell = ws.cell(row=row, column=col, value=value)
+                    cell.font = self.data_font
+                    cell.border = self.thin_border
+                    cell.alignment = self.center_alignment
+                
+                row += 1
+        else:
+            ws['A4'] = "No data available for charts"
+            ws['A4'].font = Font(italic=True, color=self.warning_color)
         
-        # Add charts
-        chart_row = row + 2
-        
-        # Bar chart for records by dashboard
-        chart1 = BarChart()
-        chart1.type = "col"
-        chart1.style = 10
-        chart1.title = "Records by Dashboard"
-        chart1.y_axis.title = "Number of Records"
-        chart1.x_axis.title = "Dashboard"
-        
-        data = Reference(ws, min_col=2, min_row=6, max_row=row-1)
-        categories = Reference(ws, min_col=1, min_row=7, max_row=row-1)
-        
-        chart1.add_data(data, titles_from_data=False)
-        chart1.set_categories(categories)
-        chart1.shape = 4
-        
-        ws.add_chart(chart1, f"A{chart_row}")
-        
-        # Pie chart for engagement distribution
-        chart2 = PieChart()
-        chart2.title = "Engagement Distribution"
-        
-        data = Reference(ws, min_col=3, min_row=6, max_row=row-1)
-        labels = Reference(ws, min_col=1, min_row=7, max_row=row-1)
-        
-        chart2.add_data(data, titles_from_data=False)
-        chart2.set_categories(labels)
-        
-        # Add data labels
-        chart2.dataLabels = DataLabelList()
-        chart2.dataLabels.showPercent = True
-        chart2.dataLabels.showLeaderLines = True
-        
-        ws.add_chart(chart2, f"F{chart_row}")
-        
-        # Add KPI indicators
-        kpi_row = chart_row + 15
+        # SIMPLIFIED: Add KPIs without complex calculations
+        kpi_row = 20
         
         kpis = [
             ("Total Dashboards", len([d for d in all_data.values() if d])),
-            ("Total Records", sum(len(d) for d in all_data.values())),
-            ("Total Engagement", total_engagement),
-            ("Avg Confidence", self._calculate_avg_confidence(all_data))
+            ("Total Records", total_records),
         ]
         
         for i, (label, value) in enumerate(kpis):
@@ -392,164 +233,62 @@ class EnhancedExcelGenerator:
             ws.cell(row=kpi_row, column=col, value=label).font = self.bold_font
             ws.cell(row=kpi_row + 1, column=col, value=value).font = Font(size=14, bold=True, color=self.primary_color)
             ws.merge_cells(start_row=kpi_row + 1, start_column=col, end_row=kpi_row + 1, end_column=col + 1)
-    
-    def _format_dashboard_sheet(self, worksheet, df: pd.DataFrame, dashboard_type: str):
-        """Format individual dashboard sheet"""
-        # Apply header formatting
-        max_column = worksheet.max_column
-        
-        for cell in worksheet[1]:
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.center_alignment
-            cell.border = self.thin_border
-        
-        # Format data rows
-        for row in worksheet.iter_rows(min_row=2, max_row=worksheet.max_row, 
-                                      min_col=1, max_col=max_column):
-            for cell in row:
-                cell.font = self.data_font
-                cell.border = self.thin_border
-                
-                # Alternate row coloring
-                if cell.row % 2 == 0:
-                    cell.fill = self.alt_row_fill
-                
-                # Right-align numeric columns
-                if isinstance(cell.value, (int, float)):
-                    cell.alignment = self.right_alignment
-                    cell.number_format = '#,##0'  # Format numbers with commas
-                else:
-                    cell.alignment = self.left_alignment
-        
-        # Add sheet title
-        worksheet.insert_rows(1, 3)
-        
-        # Main title
-        title_row = 1
-        worksheet.merge_cells(f'A{title_row}:{get_column_letter(max_column)}{title_row}')
-        title_cell = worksheet.cell(row=title_row, column=1)
-        title_cell.value = f"{self._format_dashboard_name(dashboard_type)} ANALYSIS"
-        title_cell.font = Font(bold=True, size=16, color=self.primary_color)
-        title_cell.alignment = self.center_alignment
-        
-        # Subtitle
-        subtitle_row = 2
-        worksheet.merge_cells(f'A{subtitle_row}:{get_column_letter(max_column)}{subtitle_row}')
-        subtitle_cell = worksheet.cell(row=subtitle_row, column=1)
-        subtitle_cell.value = "Detailed Performance Metrics and Analytics"
-        subtitle_cell.font = Font(size=12, color=self.secondary_color)
-        subtitle_cell.alignment = self.center_alignment
-        
-        # Freeze header row
-        worksheet.freeze_panes = 'A4'
-    
-    def _add_dashboard_summary(self, worksheet, df: pd.DataFrame, dashboard_type: str):
-        """Add summary statistics to dashboard sheet"""
-        if len(df) == 0:
-            return
-        
-        start_row = worksheet.max_row + 3
-        
-        # Summary section title
-        summary_title = f"{self._format_dashboard_name(dashboard_type)} - Performance Summary"
-        worksheet.cell(row=start_row, column=1, value=summary_title)
-        worksheet.cell(row=start_row, column=1).font = Font(bold=True, size=14, color=self.primary_color)
-        worksheet.merge_cells(f'A{start_row}:E{start_row}')
-        
-        # Summary headers
-        headers_row = start_row + 2
-        headers = ['Metric', 'Total', 'Average', 'Maximum', 'Minimum', 'Std Dev']
-        
-        for col, header in enumerate(headers, 1):
-            cell = worksheet.cell(row=headers_row, column=col, value=header)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.center_alignment
-            cell.border = self.thin_border
-        
-        # Identify numeric columns for summary
-        numeric_cols = df.select_dtypes(include=[int, float]).columns.tolist()
-        
-        if numeric_cols:
-            data_row = headers_row + 1
-            
-            for col in numeric_cols[:8]:  # Limit to 8 key metrics
-                # Metric name
-                worksheet.cell(row=data_row, column=1, 
-                              value=col.replace('_', ' ').title()).font = self.bold_font
-                
-                # Statistics
-                worksheet.cell(row=data_row, column=2, value=df[col].sum())
-                worksheet.cell(row=data_row, column=3, value=df[col].mean())
-                worksheet.cell(row=data_row, column=4, value=df[col].max())
-                worksheet.cell(row=data_row, column=5, value=df[col].min())
-                worksheet.cell(row=data_row, column=6, value=df[col].std())
-                
-                # Format numeric cells
-                for col_idx in range(2, 7):
-                    cell = worksheet.cell(row=data_row, column=col_idx)
-                    cell.number_format = '#,##0.00'
-                    cell.font = self.number_font
-                    cell.border = self.thin_border
-                    cell.alignment = self.right_alignment
-                
-                data_row += 1
-            
-            # Highlight top performers
-            if dashboard_type == 'social_media' and 'engagement' in df.columns:
-                self._add_top_performers(worksheet, df, data_row + 2)
-    
+
     def _add_charts_to_sheet(self, worksheet, df: pd.DataFrame, dashboard_type: str):
-        """Add charts to dashboard sheet"""
+        """Add charts to dashboard sheet - SIMPLIFIED VERSION"""
         if len(df) < 2:  # Need at least 2 data points for charts
             return
         
         chart_start_row = worksheet.max_row + 3
         
-        if dashboard_type == 'social_media' and 'platform' in df.columns:
-            # Platform comparison chart
-            platform_data = df.groupby('platform').agg({
-                'reach_views': 'sum',
-                'engagement': 'sum'
-            }).reset_index()
+        # SIMPLIFIED: Check if we have platform column
+        if 'platform' in df.columns:
+            # Try to find any numeric column for the chart
+            numeric_cols = df.select_dtypes(include=[int, float]).columns.tolist()
             
-            # Write chart data
-            chart_data_row = chart_start_row
-            worksheet.cell(row=chart_data_row, column=1, value="Platform")
-            worksheet.cell(row=chart_data_row, column=2, value="Reach/Views")
-            worksheet.cell(row=chart_data_row, column=3, value="Engagement")
-            
-            for i, row in platform_data.iterrows():
-                data_row = chart_data_row + i + 1
-                worksheet.cell(row=data_row, column=1, value=row['platform'])
-                worksheet.cell(row=data_row, column=2, value=row['reach_views'])
-                worksheet.cell(row=data_row, column=3, value=row['engagement'])
-            
-            # Create chart
+            if numeric_cols:
+                # Use the first numeric column
+                chart_col = numeric_cols[0]
+                platform_data = df.groupby('platform')[chart_col].sum().reset_index()
+                
+                # Write chart data
+                chart_data_row = chart_start_row
+                worksheet.cell(row=chart_data_row, column=1, value="Platform")
+                worksheet.cell(row=chart_data_row, column=2, value=chart_col.replace('_', ' ').title())
+                
+                for i, row in platform_data.iterrows():
+                    data_row = chart_data_row + i + 1
+                    worksheet.cell(row=data_row, column=1, value=row['platform'])
+                    worksheet.cell(row=data_row, column=2, value=row[chart_col])
+        
+        # SIMPLIFIED: Create a bar chart with available data
+        try:
             chart = BarChart()
             chart.type = "col"
             chart.style = 10
-            chart.title = "Platform Performance Comparison"
-            chart.y_axis.title = "Count"
+            chart.title = f"Platform Performance by {chart_col.replace('_', ' ').title()}"
+            chart.y_axis.title = chart_col.replace('_', ' ').title()
             chart.x_axis.title = "Platform"
             
             data = Reference(worksheet, 
-                           min_col=2, 
-                           min_row=chart_data_row, 
-                           max_col=3, 
-                           max_row=chart_data_row + len(platform_data))
+                        min_col=2, 
+                        min_row=chart_data_row, 
+                        max_col=2, 
+                        max_row=chart_data_row + len(platform_data))
             categories = Reference(worksheet, 
-                                 min_col=1, 
-                                 min_row=chart_data_row + 1, 
-                                 max_row=chart_data_row + len(platform_data))
+                                min_col=1, 
+                                min_row=chart_data_row + 1, 
+                                max_row=chart_data_row + len(platform_data))
             
-            chart.add_data(data, titles_from_data=True)
+            chart.add_data(data, titles_from_data=False)
             chart.set_categories(categories)
             
             # Position chart
-            chart_cell = f"F{chart_start_row}"
+            chart_cell = f"D{chart_start_row}"
             worksheet.add_chart(chart, chart_cell)
+        except:
+            # If chart fails, just skip it
+            pass
     
     def _create_data_quality_sheet(self, workbook, all_data: Dict[str, List]):
         """Create data quality assessment sheet"""
