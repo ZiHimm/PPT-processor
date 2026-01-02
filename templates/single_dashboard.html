@@ -1,0 +1,71 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>{{DASHBOARD_TITLE}}</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Arial, sans-serif; 
+            margin: 0; 
+            padding: 20px; 
+            background: #f5f7fa;
+        }
+        .dashboard-header { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; 
+            padding: 30px; 
+            border-radius: 15px;
+            margin-bottom: 30px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .chart-container { 
+            background: white; 
+            padding: 25px; 
+            margin: 20px 0; 
+            border-radius: 12px; 
+            box-shadow: 0 2px 15px rgba(0,0,0,0.08);
+        }
+        .container { 
+            max-width: 1400px; 
+            margin: 0 auto;
+        }
+        h1 { 
+            margin: 0; 
+            font-size: 36px; 
+            font-weight: 300;
+        }
+        .subtitle { 
+            margin: 10px 0 0 0; 
+            font-weight: 300; 
+            opacity: 0.9;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="dashboard-header">
+            <h1>{{DASHBOARD_TITLE}}</h1>
+            <p class="subtitle">Marketing Performance Dashboard - Automated Insights</p>
+        </div>
+        
+        <div id="charts-container">
+            <!-- Charts will be inserted here by JavaScript -->
+        </div>
+    </div>
+
+    <script>
+        const figures = {{FIGURES_JSON}};
+        const chartsContainer = document.getElementById('charts-container');
+        
+        // Render all figures
+        Object.keys(figures).forEach(figId => {
+            const container = document.createElement('div');
+            container.className = 'chart-container';
+            container.id = figId;
+            chartsContainer.appendChild(container);
+            
+            Plotly.newPlot(figId, figures[figId].data, figures[figId].layout);
+        });
+    </script>
+</body>
+</html>

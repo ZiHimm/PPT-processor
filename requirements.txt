@@ -1,0 +1,29 @@
+﻿# Core Dependencies
+python-pptx>=1.0.0
+pandas>=2.0.0
+openpyxl>=3.0.0
+plotly>=5.0.0
+pyyaml>=6.0.0
+numpy>=1.24.0
+
+# GUI and Development
+tkinterdnd2>=0.3.0  # For drag and drop support
+Pillow>=10.0.0  # For image processing
+
+# Database
+sqlite3  # Built-in
+
+# Optional Dependencies (uncomment if needed)
+# xlsxwriter>=3.0.0  # Alternative Excel writer
+# matplotlib>=3.7.0  # For additional plotting
+# seaborn>=0.12.0  # For statistical visualizations
+# scikit-learn>=1.3.0  # For machine learning features
+# jinja2>=3.0.0  # For template rendering
+# requests>=2.31.0  # For API integration
+# python-docx>=0.8.11  # For Word report generation
+# reportlab>=4.0.0  # For PDF generation
+
+# Development tools
+# black>=23.0.0  # Code formatting
+# flake8>=6.0.0  # Linting
+# pytest>=7.0.0  # Testing
