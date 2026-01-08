@@ -1,12 +1,11 @@
-def group_into_columns(shapes, tolerance=150):
+def group_into_columns(shapes, tolerance=200):
     """
     Group shapes into columns based on horizontal position.
     
     Args:
         shapes: List of {"text", "left", "top"} dicts from a slide
-        tolerance: Maximum horizontal distance (in PPT units) to consider shapes 
-                  as part of the same column. Default 150 works for most PPT layouts.
-                  1 PPT unit = 1/914400 inches ≈ 0.028 microns.
+        tolerance: Maximum horizontal distance to consider shapes as part of same column.
+                  200 works better for your PPT layout.
     
     Returns:
         List of {"x": center_x, "items": [shapes]} sorted left to right
@@ -31,7 +30,7 @@ def group_into_columns(shapes, tolerance=150):
         # If not close to any existing column, start a new one
         if not assigned:
             columns.append({
-                "x": shape["left"],  # Use shape's left as column reference
+                "x": shape["left"],
                 "items": [shape]
             })
     
