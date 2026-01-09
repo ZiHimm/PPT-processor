@@ -1,8 +1,12 @@
 # post_extractor.py
+import os
+import sys
 import re
 from typing import List, Dict, Optional
 from column_parser import group_into_columns
 from table_reassembler import reassemble_table_cells
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ================= HELPERS =================
 

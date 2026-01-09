@@ -1,3 +1,4 @@
-python-pptx>=1.0.0
 pandas>=1.5.0
-openpyxl>=3.0.0  # Needed for column width adjustment
+openpyxl>=3.0.0
+python-pptx>=0.6.21
+numpy>=1.21.0  # For better data handling
