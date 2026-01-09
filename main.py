@@ -10,7 +10,7 @@ logging.basicConfig(
     datefmt='%H:%M:%S'
 )
 
-PPT_PATH = r"C:\Users\user\Downloads\TFVM_REPORT (MARCH 2025).pptx"
+PPT_PATH = r"C:\Users\user\Downloads\TFVM_REPORT (FEBRUARY 2025).pptx"
 OUTPUT_EXCEL = r"C:\Users\user\Desktop\monthly_analysis\output\marchmarketing_summary.xlsx"
 
 def should_process_slide(shapes):
