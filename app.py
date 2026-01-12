@@ -1,4 +1,3 @@
-# app.py - FIXED VERSION
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
@@ -9,7 +8,16 @@ import os
 import sys
 import re
 import traceback
+import webbrowser
 from processor import process_presentations
+
+# Import dashboard functions - check if available
+try:
+    from social_dashboard import create_social_media_dashboard, create_multi_month_social_dashboard
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    print("⚠️ Dashboard module not available. Excel export only.")
 
 if getattr(sys, 'frozen', False):
     # Running as compiled executable
@@ -32,7 +40,7 @@ class SocialMediaExtractorGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("📊 Social Media Report Extractor")
-        self.root.geometry("900x750")
+        self.root.geometry("950x800")  # Slightly taller for dashboard options
         self.root.minsize(800, 600)
         
         # Queue for thread-safe updates
@@ -41,8 +49,12 @@ class SocialMediaExtractorGUI:
         # Store selected files
         self.selected_files = []
         
-        # Initialize variables that will be created in setup_ui
+        # Initialize variables
         self.status_var = None
+        
+        # Dashboard related variables
+        self.dashboard_enabled = tk.BooleanVar(value=True if DASHBOARD_AVAILABLE else False)
+        self.dashboard_opened = False
         
         # Setup UI
         self.setup_ui()
@@ -74,7 +86,7 @@ class SocialMediaExtractorGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)  # Increased for dashboard section
         
         # ==================== TITLE ====================
         title_frame = ttk.Frame(main_frame)
@@ -89,13 +101,23 @@ class SocialMediaExtractorGUI:
         )
         title.grid(row=0, column=0, sticky=tk.W)
         
+        # Dashboard indicator
+        if DASHBOARD_AVAILABLE:
+            dash_label = ttk.Label(
+                title_frame,
+                text="+ Interactive Dashboard",
+                font=("Arial", 9, "bold"),
+                foreground="#3498db"
+            )
+            dash_label.grid(row=0, column=1, sticky=tk.E, padx=(0, 10))
+        
         version = ttk.Label(
             title_frame,
-            text="v1.0",
+            text="v1.1" if DASHBOARD_AVAILABLE else "v1.0",
             font=("Arial", 9),
             foreground="gray"
         )
-        version.grid(row=0, column=1, sticky=tk.E)
+        version.grid(row=0, column=2, sticky=tk.E)
         
         # ==================== SECTION 1: INPUT FILES ====================
         input_frame = ttk.LabelFrame(main_frame, text="1. Select PowerPoint Files", padding="10")
@@ -278,9 +300,81 @@ class SocialMediaExtractorGUI:
         )
         self.preview_label.grid(row=0, column=0, sticky=(tk.W, tk.E))
         
-        # ==================== SECTION 3: PROCESS ====================
-        process_frame = ttk.LabelFrame(main_frame, text="3. Process Files", padding="10")
-        process_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        # ==================== SECTION 3: DASHBOARD OPTIONS ====================
+        if DASHBOARD_AVAILABLE:
+            dash_frame = ttk.LabelFrame(main_frame, text="3. Dashboard Options", padding="10")
+            dash_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 15))
+            
+            # Dashboard checkbox
+            dash_check_frame = ttk.Frame(dash_frame)
+            dash_check_frame.pack(fill=tk.X, pady=5)
+            
+            self.dashboard_check = ttk.Checkbutton(
+                dash_check_frame,
+                text="Generate Interactive Dashboard",
+                variable=self.dashboard_enabled,
+                onvalue=True,
+                offvalue=False,
+                command=self.toggle_dashboard_options
+            )
+            self.dashboard_check.pack(side=tk.LEFT)
+            
+            # Dashboard options
+            self.dash_options_frame = ttk.Frame(dash_frame)
+            self.dash_options_frame.pack(fill=tk.X, pady=(5, 0))
+            
+            # Open after creation
+            self.open_dash_var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(
+                self.dash_options_frame,
+                text="Open dashboard automatically",
+                variable=self.open_dash_var
+            ).pack(side=tk.LEFT, padx=(20, 15))
+            
+            # Dark mode
+            self.dark_mode_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                self.dash_options_frame,
+                text="Enable dark mode",
+                variable=self.dark_mode_var
+            ).pack(side=tk.LEFT, padx=(0, 15))
+            
+            # Multi-month comparison
+            self.multi_month_var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(
+                self.dash_options_frame,
+                text="Multi-month comparison (if multiple files)",
+                variable=self.multi_month_var
+            ).pack(side=tk.LEFT)
+            
+            # Dashboard info
+            info_text = "• Interactive charts & graphs\n• Performance analysis\n• Trend tracking\n• Automated insights"
+            info_label = ttk.Label(
+                dash_frame,
+                text=info_text,
+                foreground="#555",
+                font=("Arial", 9),
+                justify=tk.LEFT,
+                background="#F8F9FA",
+                padding=(10, 5),
+                relief=tk.SUNKEN,
+                borderwidth=1
+            )
+            info_label.pack(fill=tk.X, pady=(10, 0))
+        
+        # ==================== SECTION 4: PROCESS ====================
+        process_frame = ttk.LabelFrame(
+            main_frame, 
+            text="4. Process Files" if DASHBOARD_AVAILABLE else "3. Process Files", 
+            padding="10"
+        )
+        process_frame.grid(
+            row=4 if DASHBOARD_AVAILABLE else 3, 
+            column=0, 
+            columnspan=3, 
+            sticky=(tk.W, tk.E), 
+            pady=(0, 15)
+        )
         
         # Progress frame
         progress_frame = ttk.Frame(process_frame)
@@ -296,14 +390,14 @@ class SocialMediaExtractorGUI:
         
         self.process_btn = ttk.Button(
             progress_frame,
-            text="🚀 Start Processing",
+            text="🚀 Start Processing" + (" + Dashboard" if DASHBOARD_AVAILABLE else ""),
             command=self.start_processing,
-            width=20,
+            width=25,
             style="Primary.TButton"
         )
         self.process_btn.pack(side=tk.RIGHT)
         
-        # Status label - CREATE THIS BEFORE CALLING update_preview
+        # Status label
         self.status_var = tk.StringVar(value="Ready to process")
         self.status_label = ttk.Label(
             process_frame, 
@@ -313,9 +407,14 @@ class SocialMediaExtractorGUI:
         )
         self.status_label.pack(pady=(5, 0))
         
-        # ==================== SECTION 4: LOG OUTPUT ====================
+        # ==================== SECTION 5: LOG OUTPUT ====================
         log_frame = ttk.LabelFrame(main_frame, text="Processing Log", padding="10")
-        log_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S))
+        log_frame.grid(
+            row=5 if DASHBOARD_AVAILABLE else 4, 
+            column=0, 
+            columnspan=3, 
+            sticky=(tk.W, tk.E, tk.N, tk.S)
+        )
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         
@@ -334,6 +433,17 @@ class SocialMediaExtractorGUI:
         log_buttons_frame = ttk.Frame(log_frame)
         log_buttons_frame.grid(row=1, column=0, sticky=tk.E, pady=(5, 0))
         
+        # Add dashboard open button (initially disabled)
+        if DASHBOARD_AVAILABLE:
+            self.open_dash_btn = ttk.Button(
+                log_buttons_frame, 
+                text="📊 Open Dashboard", 
+                command=self.open_dashboard,
+                width=15,
+                state=tk.DISABLED
+            )
+            self.open_dash_btn.pack(side=tk.LEFT, padx=5)
+        
         ttk.Button(
             log_buttons_frame, 
             text="📋 Copy Log", 
@@ -351,6 +461,10 @@ class SocialMediaExtractorGUI:
         # Initial preview update
         self.safe_update_preview()
         
+        # Initialize dashboard options visibility
+        if DASHBOARD_AVAILABLE:
+            self.toggle_dashboard_options()
+    
     def setup_styles(self):
         """Configure custom styles for the application"""
         style = ttk.Style()
@@ -378,6 +492,18 @@ class SocialMediaExtractorGUI:
         style.configure("TLabelframe.Label",
                        font=("Arial", 10, "bold"),
                        foreground="#2C3E50")
+    
+    def toggle_dashboard_options(self):
+        """Show/hide dashboard options based on checkbox"""
+        if DASHBOARD_AVAILABLE:
+            if self.dashboard_enabled.get():
+                self.dash_options_frame.pack(fill=tk.X, pady=(5, 0))
+                # Update button text
+                self.process_btn.config(text="🚀 Start Processing + Dashboard")
+            else:
+                self.dash_options_frame.pack_forget()
+                # Update button text
+                self.process_btn.config(text="🚀 Start Processing")
     
     def safe_update_preview(self):
         """Safe version of update_preview that checks if status_var exists"""
@@ -472,7 +598,7 @@ class SocialMediaExtractorGUI:
         # Update the display
         self.fullpath_var.set(full_path)
         
-        # Check if file exists (only if status_var exists)
+        # Check if file exists
         if hasattr(self, 'status_var'):
             if os.path.exists(full_path):
                 try:
@@ -573,6 +699,8 @@ class SocialMediaExtractorGUI:
         if count == 0:
             self.file_count_var.set("No files selected")
             self.process_btn.config(state=tk.DISABLED)
+            if DASHBOARD_AVAILABLE:
+                self.open_dash_btn.config(state=tk.DISABLED)
         else:
             self.file_count_var.set(f"{count} file{'s' if count != 1 else ''} selected")
             self.process_btn.config(state=tk.NORMAL)
@@ -629,6 +757,8 @@ class SocialMediaExtractorGUI:
                     self.status_label.config(foreground="red")
                 elif msg_type == "success":
                     self.processing_success(data)
+                elif msg_type == "dashboard_created":
+                    self.dashboard_created(data)
         except queue.Empty:
             pass
         self.root.after(100, self.check_queue)
@@ -675,9 +805,21 @@ class SocialMediaExtractorGUI:
             file_name = os.path.basename(file_path)
             self.log_message(f"  {i}. {file_name}")
         self.log_message(f"📄 Output File: {os.path.basename(output_file)}")
+        
+        # Show dashboard options if enabled
+        if DASHBOARD_AVAILABLE and self.dashboard_enabled.get():
+            self.log_message(f"📊 Dashboard: Enabled")
+            if self.multi_month_var.get() and len(self.selected_files) > 1:
+                self.log_message(f"  • Multi-month comparison")
+            if self.open_dash_var.get():
+                self.log_message(f"  • Will open automatically")
+            if self.dark_mode_var.get():
+                self.log_message(f"  • Dark mode enabled")
+        
         self.log_message("=" * 60)
         self.log_message("🚀 Starting processing...")
         
+        # Start processing thread with dashboard options
         thread = threading.Thread(
             target=self.process_files_thread,
             args=(self.selected_files, output_file),
@@ -688,11 +830,17 @@ class SocialMediaExtractorGUI:
     def process_files_thread(self, files, output_file):
         """Thread function to process files"""
         try:
-            # Process all files
+            # Process all files (Excel creation)
             count = process_presentations(files, output_file)
             
             if count > 0:
                 self.queue.put(("success", {"count": count, "file": output_file}))
+                
+                # Generate dashboard if enabled
+                if DASHBOARD_AVAILABLE and self.dashboard_enabled.get():
+                    self.generate_dashboard(files, output_file, count)
+                else:
+                    self.queue.put(("enable_ui", None))
             else:
                 self.queue.put(("error", "No posts were extracted from any file"))
                 
@@ -702,10 +850,159 @@ class SocialMediaExtractorGUI:
                 error_msg += f"\n\n{traceback.format_exc()}"
             self.queue.put(("error", error_msg))
         finally:
+            if not DASHBOARD_AVAILABLE or not self.dashboard_enabled.get():
+                self.queue.put(("enable_ui", None))
+    
+    def generate_dashboard(self, files, output_file, count):
+        """Generate interactive dashboard"""
+        try:
+            self.queue.put(("log", "📊 Creating interactive dashboard..."))
+            
+            output_dir = os.path.dirname(output_file)
+            
+            if len(files) > 1 and self.multi_month_var.get():
+                # Multi-month dashboard
+                self.queue.put(("log", "📈 Creating multi-month comparison dashboard..."))
+                results = create_multi_month_social_dashboard(files, output_dir)
+                
+                if results and results.get('combined_dashboard'):
+                    dashboard_path = results['combined_dashboard']
+                    self.queue.put(("dashboard_created", {
+                        "path": dashboard_path,
+                        "type": "multi_month",
+                        "count": count,
+                        "file": output_file
+                    }))
+                else:
+                    # Fallback to single dashboard
+                    self.queue.put(("log", "⚠️ Multi-month dashboard failed, creating single dashboard..."))
+                    dashboard_path = create_social_media_dashboard(output_file)
+                    self.queue.put(("dashboard_created", {
+                        "path": dashboard_path,
+                        "type": "single",
+                        "count": count,
+                        "file": output_file
+                    }))
+            else:
+                # Single dashboard
+                dashboard_path = create_social_media_dashboard(output_file)
+                self.queue.put(("dashboard_created", {
+                    "path": dashboard_path,
+                    "type": "single",
+                    "count": count,
+                    "file": output_file
+                }))
+                
+        except Exception as e:
+            self.queue.put(("log", f"⚠️ Dashboard creation failed: {str(e)}"))
+            self.queue.put(("log", "✅ Excel file was created successfully"))
             self.queue.put(("enable_ui", None))
     
+    def dashboard_created(self, data):
+        """Handle successful dashboard creation"""
+        dashboard_path = data["path"]
+        dashboard_type = data["type"]
+        count = data["count"]
+        output_file = data["file"]
+        
+        # Store dashboard path for later opening
+        self.current_dashboard = dashboard_path
+        
+        # Enable dashboard open button
+        if DASHBOARD_AVAILABLE:
+            self.open_dash_btn.config(state=tk.NORMAL)
+            self.dashboard_opened = False
+        
+        # Log dashboard info
+        self.queue.put(("log", "=" * 60))
+        self.queue.put(("log", "📊 DASHBOARD CREATED"))
+        self.queue.put(("log", "=" * 60))
+        
+        if dashboard_type == "multi_month":
+            self.queue.put(("log", "📈 Multi-month comparison dashboard created"))
+            self.queue.put(("log", f"   • Compare performance across {len(self.selected_files)} months"))
+        else:
+            self.queue.put(("log", "📈 Interactive dashboard created"))
+        
+        self.queue.put(("log", f"📍 Location: {os.path.basename(os.path.dirname(dashboard_path))}/"))
+        self.queue.put(("log", f"📄 File: {os.path.basename(dashboard_path)}"))
+        self.queue.put(("log", "✨ Features: Interactive charts, trends, insights, filters"))
+        
+        # Final success message
+        self.queue.put(("log", "=" * 60))
+        self.queue.put(("log", "✅ PROCESSING COMPLETE"))
+        self.queue.put(("log", "=" * 60))
+        self.queue.put(("log", f"📊 Total Posts Extracted: {count:,}"))
+        self.queue.put(("log", f"📁 Excel File: {os.path.basename(output_file)}"))
+        self.queue.put(("log", f"📊 Dashboard: {os.path.basename(dashboard_path)}"))
+        
+        # Update status
+        self.status_var.set(f"✅ Extracted {count:,} posts + Dashboard")
+        self.status_label.config(foreground="green")
+        
+        # Ask to open dashboard if enabled
+        if self.open_dash_var.get() and not self.dashboard_opened:
+            self.root.after(1000, self.ask_open_dashboard, dashboard_path, output_file)
+        
+        self.queue.put(("enable_ui", None))
+    
+    def ask_open_dashboard(self, dashboard_path, excel_file):
+        """Ask user if they want to open the dashboard"""
+        if not self.dashboard_opened:
+            response = messagebox.askyesno(
+                "🎉 Dashboard Created!",
+                f"✅ Successfully extracted data and created interactive dashboard!\n\n"
+                f"📊 Posts Extracted: {len(self.selected_files)} file(s) → {self.get_post_count()} posts\n"
+                f"📁 Excel File: {os.path.basename(excel_file)}\n"
+                f"📈 Dashboard: {os.path.basename(dashboard_path)}\n\n"
+                "Open the interactive dashboard now?"
+            )
+            
+            if response:
+                self.open_dashboard()
+            else:
+                # Show alternative options
+                alt_response = messagebox.askyesno(
+                    "Open Files",
+                    "Open Excel file instead?"
+                )
+                if alt_response:
+                    try:
+                        os.startfile(excel_file)
+                        self.log_message("📂 Opening Excel file...")
+                    except:
+                        self.log_message("⚠️ Could not open Excel file")
+    
+    def get_post_count(self):
+        """Get approximate post count from log"""
+        # This is a simplified version - you might want to track this differently
+        return "multiple" if len(self.selected_files) > 1 else "all"
+    
+    def open_dashboard(self):
+        """Open the dashboard in browser"""
+        if hasattr(self, 'current_dashboard') and self.current_dashboard and os.path.exists(self.current_dashboard):
+            try:
+                webbrowser.open('file://' + os.path.abspath(self.current_dashboard))
+                self.log_message("🌐 Opening dashboard in browser...")
+                self.dashboard_opened = True
+                if DASHBOARD_AVAILABLE:
+                    self.open_dash_btn.config(state=tk.DISABLED)
+            except Exception as e:
+                self.log_message(f"⚠️ Could not open dashboard: {e}")
+                messagebox.showerror(
+                    "Cannot Open Dashboard",
+                    f"Could not open the dashboard automatically.\n\n"
+                    f"Please open this file manually:\n\n{self.current_dashboard}"
+                )
+        else:
+            messagebox.showwarning(
+                "No Dashboard",
+                "No dashboard has been created yet.\n\n"
+                "Please process files with 'Generate Interactive Dashboard' enabled."
+            )
+    
     def processing_success(self, data):
-        """Handle successful processing"""
+        """Handle successful processing (without dashboard)"""
         count = data["count"]
         output_file = data["file"]
         
@@ -714,22 +1011,35 @@ class SocialMediaExtractorGUI:
         self.log_message("=" * 60)
         self.log_message(f"📊 Total Posts Extracted: {count:,}")
         self.log_message(f"📁 Output File: {output_file}")
-        self.log_message("✨ Features: Filters, Sorting, Color Coding, Charts")
+        
+        if not DASHBOARD_AVAILABLE:
+            self.log_message("✨ Features: Filters, Sorting, Color Coding, Charts")
         
         # Update status
         self.status_var.set(f"✅ Extracted {count:,} posts")
         self.status_label.config(foreground="green")
         
         # Show success dialog
-        features = [
-            "✅ Auto-filter dropdowns in every column",
-            "✅ One-click sorting (click column headers)",
-            "✅ Color-coded post types",
-            "✅ Conditional formatting for metrics",
-            "✅ Summary statistics section",
-            "✅ Interactive charts",
-            "✅ Clickable social media links"
-        ]
+        if DASHBOARD_AVAILABLE and not self.dashboard_enabled.get():
+            features = [
+                "✅ Auto-filter dropdowns in every column",
+                "✅ One-click sorting (click column headers)",
+                "✅ Color-coded post types",
+                "✅ Conditional formatting for metrics",
+                "✅ Summary statistics section",
+                "✅ Interactive charts",
+                "✅ Clickable social media links"
+            ]
+        else:
+            features = [
+                "✅ Auto-filter dropdowns in every column",
+                "✅ One-click sorting (click column headers)",
+                "✅ Color-coded post types",
+                "✅ Conditional formatting for metrics",
+                "✅ Summary statistics section",
+                "✅ Interactive charts",
+                "✅ Clickable social media links"
+            ]
         
         features_text = "\n".join(features)
         

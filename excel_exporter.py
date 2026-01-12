@@ -15,9 +15,9 @@ def export_to_excel(posts: List[Dict], output_path: str):
         print("No posts to export")
         return
     
-    # Define column order - ADDED "Date" column
+    # Define column order - ADDED "Source File" column
     columns = [
-        "Slide", "Post #", "Type", "Title", "Date",
+        "Source File", "Slide", "Post #", "Type", "Title", "Date",
         "Reach", "Views", "Engagement", 
         "Likes", "Shares", "Comments", "Saved",
         "Link"
@@ -42,6 +42,7 @@ def export_to_excel(posts: List[Dict], output_path: str):
             clean_title = re.sub(r'\s+', ' ', clean_title)
         
         rows.append({
+            "Source File": post.get("source_file", "Unknown"),  # NEW COLUMN
             "Slide": post.get("slide_number"),
             "Post #": post.get("post_index"),
             "Type": post.get("type", "").capitalize(),

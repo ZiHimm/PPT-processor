@@ -1,5 +1,6 @@
-# processor.py
+# processor.py - MODIFIED VERSION
 import os
+import json
 from ppt_reader import PPTReader
 from post_extractor import extract_posts_from_slide
 from excel_exporter import export_to_excel
@@ -7,7 +8,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def process_presentations(ppt_paths, output_excel):
+def process_presentations(ppt_paths, output_excel, generate_dashboard=False):
     all_posts = []
     total_files = len(ppt_paths)
     
@@ -15,6 +16,9 @@ def process_presentations(ppt_paths, output_excel):
     
     for file_index, ppt_path in enumerate(ppt_paths, 1):
         try:
+            # Get just the filename without path
+            filename = os.path.basename(ppt_path)
+            
             # Create PPTReader instance for each presentation
             ppt_reader = PPTReader(ppt_path)
             
@@ -29,14 +33,16 @@ def process_presentations(ppt_paths, output_excel):
                 # Extract posts from the shapes
                 posts = extract_posts_from_slide(shapes, slide_index)
                 
-                # Add posts to collection
+                # Add posts to collection WITH FILENAME
                 for post in posts:
+                    # Add source filename to post data
+                    post["source_file"] = filename
                     # Renumber posts for combined output
                     post["post_index"] = len(all_posts) + 1
                     all_posts.append(post)
                     file_posts += 1
             
-            logger.info(f"File {file_index}/{total_files}: {file_posts} posts extracted from {os.path.basename(ppt_path)}")
+            logger.info(f"File {file_index}/{total_files}: {file_posts} posts extracted from {filename}")
             
         except Exception as e:
             logger.error(f"Error processing {ppt_path}: {e}")
@@ -49,4 +55,9 @@ def process_presentations(ppt_paths, output_excel):
     export_to_excel(all_posts, output_excel)
     
     logger.info(f"✅ Total: {len(all_posts)} posts exported to {output_excel}")
-    return len(all_posts)
+    
+    # If dashboard generation is requested, return the data for dashboard
+    if generate_dashboard:
+        return len(all_posts), all_posts
+    else:
+        return len(all_posts)
