@@ -1,18 +1,22 @@
+# social_dashboard.py - UPDATED VERSION
 import os
 import json
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Dict, List, Union
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import webbrowser
 
 class EnhancedJSONEncoder(json.JSONEncoder):
-    """Enhanced JSON encoder for dashboard data."""
+    """Enhanced JSON encoder that handles all common data types."""
     
     def default(self, obj: Any) -> Any:
+        """Handle various data types for JSON serialization."""
+        
+        # Handle numpy types
         if isinstance(obj, np.integer):
             return int(obj)
         if isinstance(obj, np.floating):
@@ -21,38 +25,85 @@ class EnhancedJSONEncoder(json.JSONEncoder):
             return obj.tolist()
         if isinstance(obj, np.bool_):
             return bool(obj)
+        
+        # Handle pandas types
         if isinstance(obj, pd.Timestamp):
             return obj.isoformat()
         if isinstance(obj, pd.Timedelta):
             return str(obj)
+        if isinstance(obj, pd.Series):
+            return obj.to_dict()
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_dict('records')
+        
+        # Handle Python standard library types
         if isinstance(obj, datetime):
             return obj.isoformat()
+        if isinstance(obj, timedelta):
+            return str(obj)
+        if isinstance(obj, Decimal):
+            return float(obj)
+        
+        # Handle complex dictionary keys
         if isinstance(obj, dict):
-            return {str(k): self.default(v) for k, v in obj.items()}
-        if pd.isna(obj):  # Handle NaN/NaT
-            return None
+            converted_dict = {}
+            for key, value in obj.items():
+                if isinstance(key, (np.integer, np.floating)):
+                    safe_key = str(key)
+                else:
+                    safe_key = key
+                converted_dict[safe_key] = self.default(value)
+            return converted_dict
+        
+        # Handle sets and other iterables
+        if isinstance(obj, set):
+            return list(obj)
+        
         return super().default(obj)
+
 
 def serialize_for_json(data: Any) -> Any:
     """Recursively convert data to JSON-serializable format."""
     if isinstance(data, dict):
-        return {str(k): serialize_for_json(v) for k, v in data.items()}
+        return {str(k) if not isinstance(k, (str, int, float, bool, type(None))) else k: 
+                serialize_for_json(v) for k, v in data.items()}
+    
     elif isinstance(data, (list, tuple, set)):
         return [serialize_for_json(item) for item in data]
+    
     elif isinstance(data, np.integer):
         return int(data)
+    
     elif isinstance(data, np.floating):
         return float(data)
+    
     elif isinstance(data, np.ndarray):
         return data.tolist()
+    
+    elif isinstance(data, np.bool_):
+        return bool(data)
+    
     elif isinstance(data, pd.Timestamp):
         return data.strftime('%Y-%m-%d %H:%M:%S')
+    
+    elif isinstance(data, pd.Timedelta):
+        return str(data)
+    
     elif isinstance(data, datetime):
         return data.strftime('%Y-%m-%d %H:%M:%S')
-    elif pd.isna(data):  # Handle NaN/NaT values
-        return None
+    
+    elif isinstance(data, timedelta):
+        return str(data)
+    
+    elif isinstance(data, Decimal):
+        return float(data)
+    
+    elif hasattr(data, '__dict__'):
+        return serialize_for_json(data.__dict__)
+    
     else:
         return data
+
 
 def safe_int(value, default=0):
     """Safely convert value to integer."""
@@ -63,6 +114,7 @@ def safe_int(value, default=0):
     except (ValueError, TypeError):
         return default
 
+
 def safe_float(value, default=0.0):
     """Safely convert value to float."""
     try:
@@ -71,6 +123,7 @@ def safe_float(value, default=0.0):
         return float(value)
     except (ValueError, TypeError):
         return default
+
 
 def safe_str(value, default=""):
     """Safely convert value to string."""
@@ -81,6 +134,7 @@ def safe_str(value, default=""):
     except (ValueError, TypeError):
         return default
 
+
 def safe_date_format(date_value, default="Unknown"):
     """Safely format date value."""
     try:
@@ -90,20 +144,20 @@ def safe_date_format(date_value, default="Unknown"):
     except:
         return default
 
+
 def calculate_social_analytics(posts_df):
     """
-    Calculate analytics for social media posts with robust error handling.
+    Calculate enhanced analytics for social media posts with new structure.
     """
     analytics = {
-        'summary_stats': {},
+        'overview_stats': {},
         'performance_analysis': {},
         'engagement_trends': {},
         'post_details': [],
         'platform_analysis': {},
-        'monthly_comparison': {},
         '_metadata': {
             'generated_at': datetime.now().isoformat(),
-            'data_version': '1.0',
+            'data_version': '2.0',
             'posts_count': 0,
             'time_period': {},
             'dashboard_type': 'social_media',
@@ -116,14 +170,13 @@ def calculate_social_analytics(posts_df):
             analytics['_metadata']['status'] = 'no_data'
             return analytics
         
-        # Clean column names (strip whitespace)
+        # Clean column names
         posts_df.columns = posts_df.columns.str.strip()
         
-        # Convert columns to appropriate types with error handling
+        # Convert columns to appropriate types
         if 'Date' in posts_df.columns:
-            # Try different date formats
             try:
-                # First try with day/month format
+                # Try with day/month format
                 posts_df['Date'] = pd.to_datetime(posts_df['Date'], format='%d/%m', errors='coerce')
                 # Add current year to dates
                 current_year = datetime.now().year
@@ -131,7 +184,6 @@ def calculate_social_analytics(posts_df):
                     lambda x: x.replace(year=current_year) if pd.notna(x) else pd.NaT
                 )
             except:
-                # Fallback to auto-detection
                 posts_df['Date'] = pd.to_datetime(posts_df['Date'], errors='coerce')
         
         # Ensure numeric columns
@@ -140,61 +192,12 @@ def calculate_social_analytics(posts_df):
             if col in posts_df.columns:
                 posts_df[col] = pd.to_numeric(posts_df[col], errors='coerce')
         
-        # ==================== 1. SUMMARY STATISTICS ====================
-        total_posts = len(posts_df)
-        
-        # Count post types safely
-        if 'Type' in posts_df.columns:
-            video_posts = posts_df['Type'].apply(lambda x: safe_str(x)).str.contains('Video', case=False, na=False).sum()
-            image_posts = posts_df['Type'].apply(lambda x: safe_str(x)).str.contains('Post|Image', case=False, na=False).sum()
-        else:
-            video_posts = 0
-            image_posts = total_posts
-        
-        # Calculate average metrics safely
-        avg_reach = safe_float(posts_df['Reach'].mean() if 'Reach' in posts_df.columns else 0)
-        avg_views = safe_float(posts_df['Views'].mean() if 'Views' in posts_df.columns else 0)
-        avg_engagement = safe_float(posts_df['Engagement'].mean() if 'Engagement' in posts_df.columns else 0)
-        avg_likes = safe_float(posts_df['Likes'].mean() if 'Likes' in posts_df.columns else 0)
-        
-        # Calculate engagement rate
-        engagement_rate = 0
-        if 'Reach' in posts_df.columns and 'Engagement' in posts_df.columns:
-            valid_mask = posts_df['Reach'].notna() & posts_df['Engagement'].notna()
-            valid_mask = valid_mask & (posts_df['Reach'] > 0)
-            valid_posts = posts_df[valid_mask]
-            if len(valid_posts) > 0:
-                engagement_rate = safe_float((valid_posts['Engagement'] / valid_posts['Reach']).mean() * 100)
-        
-        # Count links
-        if 'Link' in posts_df.columns:
-            links_count = posts_df['Link'].notna().sum()
-        else:
-            links_count = 0
-        
-        analytics['summary_stats'] = {
-            'total_posts': int(total_posts),
-            'video_posts': int(video_posts),
-            'image_posts': int(image_posts),
-            'video_percentage': safe_float((video_posts / total_posts * 100) if total_posts > 0 else 0),
-            'avg_reach': avg_reach,
-            'avg_views': avg_views,
-            'avg_engagement': avg_engagement,
-            'avg_likes': avg_likes,
-            'engagement_rate': engagement_rate,
-            'total_links': int(links_count),
-            'links_percentage': safe_float((links_count / total_posts * 100) if total_posts > 0 else 0)
-        }
-        
-        # ==================== 2. POST DETAILS ====================
+        # ==================== 1. POST DETAILS (like agent_details) ====================
         post_details = []
+        
         for idx, row in posts_df.iterrows():
             try:
-                # Get slide number safely
-                slide_val = safe_int(row.get('Slide', 0))
-                post_num = safe_int(row.get('Post #', idx + 1))
-                
-                # Get post type safely
+                # Get post type
                 post_type_raw = safe_str(row.get('Type', 'Post')).lower()
                 if 'video' in post_type_raw:
                     post_type = 'video'
@@ -208,59 +211,122 @@ def calculate_social_analytics(posts_df):
                 else:
                     date_display = date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)
                 
-                post = {
+                # Get metrics
+                reach = safe_float(row.get('Reach', 0))
+                views = safe_float(row.get('Views', 0))
+                engagement = safe_float(row.get('Engagement', 0))
+                likes = safe_float(row.get('Likes', 0))
+                shares = safe_float(row.get('Shares', 0))
+                comments = safe_float(row.get('Comments', 0))
+                saved = safe_float(row.get('Saved', 0))
+                
+                # Calculate engagement rate
+                engagement_rate = 0
+                if post_type == 'video' and views > 0:
+                    engagement_rate = safe_float((engagement / views) * 100)
+                elif post_type == 'post' and reach > 0:
+                    engagement_rate = safe_float((engagement / reach) * 100)
+                
+                # Determine performance category
+                if post_type == 'video':
+                    if engagement >= 10000:
+                        performance_category = 'high_performing'
+                    elif engagement >= 5000:
+                        performance_category = 'medium_performing'
+                    else:
+                        performance_category = 'low_performing'
+                else:  # post
+                    if engagement >= 5000:
+                        performance_category = 'high_performing'
+                    elif engagement >= 2000:
+                        performance_category = 'medium_performing'
+                    else:
+                        performance_category = 'low_performing'
+                
+                # Check if post has link
+                has_link = not pd.isna(row.get('Link', '')) and safe_str(row.get('Link', '')) != ''
+                
+                post_detail = {
                     'post_id': idx + 1,
-                    'slide': slide_val,
-                    'post_number': post_num,
+                    'slide': safe_int(row.get('Slide', 0)),
+                    'post_number': safe_int(row.get('Post #', 0)),
                     'type': post_type,
                     'title': safe_str(row.get('Title', '')),
                     'date': date_display,
-                    'reach': safe_float(row.get('Reach', 0)),
-                    'views': safe_float(row.get('Views', 0)),
-                    'engagement': safe_float(row.get('Engagement', 0)),
-                    'likes': safe_float(row.get('Likes', 0)),
-                    'shares': safe_float(row.get('Shares', 0)),
-                    'comments': safe_float(row.get('Comments', 0)),
-                    'saved': safe_float(row.get('Saved', 0)),
+                    'reach': reach,
+                    'views': views,
+                    'engagement': engagement,
+                    'likes': likes,
+                    'shares': shares,
+                    'comments': comments,
+                    'saved': saved,
+                    'engagement_rate': engagement_rate,
                     'link': safe_str(row.get('Link', '')),
-                    'has_link': not pd.isna(row.get('Link', '')) and safe_str(row.get('Link', '')) != ''
+                    'has_link': has_link,
+                    'source_file': safe_str(row.get('Source File', '')),
+                    'performance_category': performance_category,
+                    'is_video': post_type == 'video',
+                    'has_high_engagement': engagement >= 10000 if post_type == 'video' else engagement >= 5000
                 }
                 
-                # Calculate engagement rate
-                if post['reach'] and post['reach'] > 0 and post['engagement']:
-                    post['engagement_rate'] = safe_float((post['engagement'] / post['reach']) * 100)
-                else:
-                    post['engagement_rate'] = 0
-                
-                # Categorize performance
-                if post['type'] == 'video':
-                    if post['views'] and post['views'] >= 10000:
-                        post['performance'] = 'high'
-                    elif post['views'] and post['views'] >= 5000:
-                        post['performance'] = 'medium'
-                    else:
-                        post['performance'] = 'low'
-                else:
-                    if post['reach'] and post['reach'] >= 10000:
-                        post['performance'] = 'high'
-                    elif post['reach'] and post['reach'] >= 5000:
-                        post['performance'] = 'medium'
-                    else:
-                        post['performance'] = 'low'
-                
-                post_details.append(post)
+                post_details.append(post_detail)
             except Exception as e:
-                # Skip problematic rows but continue processing
                 print(f"⚠️ Warning: Skipping row {idx} due to error: {e}")
                 continue
         
         analytics['post_details'] = post_details
         
+        # ==================== 2. OVERVIEW STATISTICS ====================
+        total_posts = len(posts_df)
+        
+        # Count post types
+        video_posts = len([p for p in post_details if p['is_video']])
+        image_posts = total_posts - video_posts
+        
+        # Calculate average metrics
+        avg_reach = safe_float(posts_df['Reach'].mean() if 'Reach' in posts_df.columns else 0)
+        avg_views = safe_float(posts_df['Views'].mean() if 'Views' in posts_df.columns else 0)
+        avg_engagement = safe_float(posts_df['Engagement'].mean() if 'Engagement' in posts_df.columns else 0)
+        avg_likes = safe_float(posts_df['Likes'].mean() if 'Likes' in posts_df.columns else 0)
+        
+        # Calculate overall engagement rate
+        overall_engagement_rate = 0
+        if 'Reach' in posts_df.columns and 'Engagement' in posts_df.columns:
+            valid_mask = posts_df['Reach'].notna() & posts_df['Engagement'].notna()
+            valid_mask = valid_mask & (posts_df['Reach'] > 0)
+            valid_posts = posts_df[valid_mask]
+            if len(valid_posts) > 0:
+                overall_engagement_rate = safe_float((valid_posts['Engagement'] / valid_posts['Reach']).mean() * 100)
+        
+        # Count links
+        links_count = len([p for p in post_details if p['has_link']])
+        
+        # Count high performing posts
+        high_performing = len([p for p in post_details if p['has_high_engagement']])
+        
+        analytics['overview_stats'] = {
+            'total_posts': int(total_posts),
+            'video_posts': int(video_posts),
+            'image_posts': int(image_posts),
+            'video_percentage': safe_float((video_posts / total_posts * 100) if total_posts > 0 else 0),
+            'high_performing_posts': int(high_performing),
+            'high_performing_pct': safe_float((high_performing / total_posts * 100) if total_posts > 0 else 0),
+            'avg_reach': avg_reach,
+            'avg_views': avg_views,
+            'avg_engagement': avg_engagement,
+            'avg_likes': avg_likes,
+            'overall_engagement_rate': overall_engagement_rate,
+            'total_links': int(links_count),
+            'links_percentage': safe_float((links_count / total_posts * 100) if total_posts > 0 else 0)
+        }
+        
         # ==================== 3. PERFORMANCE ANALYSIS ====================
         if 'Engagement' in posts_df.columns:
             # Filter out NaN values
             valid_engagement = posts_df[posts_df['Engagement'].notna()]
+            
             if len(valid_engagement) > 0:
+                # Top posts
                 top_posts = valid_engagement.nlargest(min(10, len(valid_engagement)), 'Engagement')
                 top_posts_list = []
                 for _, row in top_posts.iterrows():
@@ -271,7 +337,8 @@ def calculate_social_analytics(posts_df):
                         'reach': safe_float(row.get('Reach', 0)),
                         'views': safe_float(row.get('Views', 0)),
                         'date': safe_date_format(row.get('Date', '')),
-                        'link': safe_str(row.get('Link', ''))
+                        'link': safe_str(row.get('Link', '')),
+                        'slide': safe_int(row.get('Slide', 0))
                     })
                 
                 # Worst performing posts
@@ -307,7 +374,10 @@ def calculate_social_analytics(posts_df):
                     'avg_engagement_by_type': {
                         'video': video_avg,
                         'post': post_avg
-                    }
+                    },
+                    'total_engagement': safe_float(valid_engagement['Engagement'].sum()),
+                    'max_engagement': safe_float(valid_engagement['Engagement'].max()),
+                    'min_engagement': safe_float(valid_engagement['Engagement'].min())
                 }
         
         # ==================== 4. ENGAGEMENT TRENDS ====================
@@ -419,7 +489,6 @@ def calculate_social_analytics(posts_df):
                 min_date = valid_dates.min()
                 max_date = valid_dates.max()
                 
-                # Safely format dates
                 min_date_str = safe_date_format(min_date)
                 max_date_str = safe_date_format(max_date)
                 
@@ -455,17 +524,18 @@ def calculate_social_analytics(posts_df):
     
     return analytics
 
+
 def generate_social_insights(analytics_data):
     """Generate automated insights for social media performance."""
     insights = []
     
-    summary = analytics_data.get('summary_stats', {})
+    overview = analytics_data.get('overview_stats', {})
     performance = analytics_data.get('performance_analysis', {})
     trends = analytics_data.get('engagement_trends', {})
     platforms = analytics_data.get('platform_analysis', {})
     
     # Insight 1: Overall performance
-    engagement_rate = summary.get('engagement_rate', 0)
+    engagement_rate = overview.get('overall_engagement_rate', 0)
     if engagement_rate >= 5:
         insights.append(f"✅ Excellent! Engagement rate is {engagement_rate:.1f}% (industry average is 1-3%)")
     elif engagement_rate >= 3:
@@ -475,20 +545,19 @@ def generate_social_insights(analytics_data):
     else:
         insights.append("📊 Starting fresh! Begin tracking engagement rates.")
     
-    # Insight 2: Video vs Image performance - FIXED: Check if data exists
+    # Insight 2: Video vs Post performance
     video_avg = performance.get('avg_engagement_by_type', {}).get('video', 0)
     post_avg = performance.get('avg_engagement_by_type', {}).get('post', 0)
     
     if video_avg > 0 and post_avg > 0:
         if video_avg > post_avg * 1.5:
-            insights.append("🎥 Videos are performing 50%+ better than images! Focus on video content.")
+            insights.append("🎥 Videos are performing 50%+ better than posts! Focus on video content.")
         elif post_avg > video_avg * 1.5:
             insights.append("📸 Image posts are outperforming videos. Consider your audience preferences.")
     
-    # Insight 3: Best platform - FIXED: Check if platforms exist
+    # Insight 3: Best platform
     if platforms and isinstance(platforms, dict) and len(platforms) > 0:
         try:
-            # Filter out None or invalid entries
             valid_platforms = {k: v for k, v in platforms.items() 
                              if v and isinstance(v, dict) and v.get('avg_engagement', 0) > 0}
             
@@ -500,31 +569,131 @@ def generate_social_insights(analytics_data):
         except Exception as e:
             print(f"Debug: Error finding best platform: {e}")
     
-    # Insight 4: Best day to post - FIXED: Check if best_day exists and is valid
+    # Insight 4: Best day to post
     best_day = trends.get('best_day') if trends else None
     if best_day and best_day not in ['None', 'Unknown', '']:
         day_avg = trends.get('day_of_week', {}).get(best_day, {}).get('avg_engagement', 0)
         if day_avg > 0:
             insights.append(f"📅 Best posting day: {best_day} (avg {day_avg:,.0f} engagement)")
     
-    # Insight 5: Link availability
-    links_pct = summary.get('links_percentage', 0)
+    # Insight 5: High performing posts
+    high_performing_pct = overview.get('high_performing_pct', 0)
+    if high_performing_pct >= 30:
+        insights.append(f"🏆 Excellent! {high_performing_pct:.0f}% of posts are high performing")
+    elif high_performing_pct >= 15:
+        insights.append(f"👍 Good! {high_performing_pct:.0f}% of posts are high performing")
+    else:
+        insights.append(f"⚠️ Only {high_performing_pct:.0f}% of posts are high performing. Need improvement.")
+    
+    # Insight 6: Link tracking
+    links_pct = overview.get('links_percentage', 0)
     if links_pct < 50:
         insights.append(f"🔗 Only {links_pct:.0f}% of posts have links. Add more trackable links!")
     elif links_pct >= 90:
         insights.append("✅ Most posts have trackable links! Great for analytics.")
     
-    # Insight 6: Top performing post
-    top_posts = performance.get('top_posts', [])
-    if top_posts and len(top_posts) > 0:
-        best_post = top_posts[0]
-        post_title = best_post.get('title', 'Untitled Post')
-        # Truncate if too long
-        if len(post_title) > 40:
-            post_title = post_title[:37] + '...'
-        insights.append(f"🏆 Top post: '{post_title}' with {best_post.get('engagement', 0):,.0f} engagement")
-    
     return insights
+
+
+def generate_insights_html(insights):
+    """Safely generate HTML for insights."""
+    if not insights:
+        return '''
+        <div class="insight-card">
+            <div class="insight-title">
+                <i class="fas fa-info-circle"></i>
+                No insights available
+            </div>
+        </div>
+        '''
+    
+    html_parts = []
+    for insight in insights:
+        insight_text = str(insight)
+        
+        # Determine icon
+        if '✅' in insight_text:
+            icon = 'fa-check-circle'
+            color = '#4CAF50'
+        elif '⚠️' in insight_text or '🔥' in insight_text or '🔴' in insight_text:
+            icon = 'fa-exclamation-triangle'
+            color = '#FF9800'
+        else:
+            icon = 'fa-info-circle'
+            color = '#2196F3'
+        
+        html_parts.append(f'''
+        <div class="insight-card">
+            <div class="insight-title">
+                <i class="fas {icon}" style="color: {color};"></i>
+                {insight_text}
+            </div>
+        </div>
+        ''')
+    
+    return ''.join(html_parts)
+
+
+def generate_posts_table_rows(post_details):
+    """Generate post table rows HTML for the dashboard."""
+    rows_html = ''
+    for post in post_details[:20]:  # Show first 20 initially
+        # Determine performance badge
+        if post['performance_category'] == 'high_performing':
+            performance_color = 'badge-success'
+            performance_text = 'High'
+        elif post['performance_category'] == 'medium_performing':
+            performance_color = 'badge-warning'
+            performance_text = 'Medium'
+        else:
+            performance_color = 'badge-danger'
+            performance_text = 'Low'
+        
+        # Format engagement number
+        engagement_str = f"{post['engagement']:,.0f}" if post['engagement'] > 0 else '0'
+        
+        # Create link display
+        link_display = ''
+        if post['has_link']:
+            platform = 'Unknown'
+            if 'instagram.com' in post['link'].lower():
+                platform = 'Instagram'
+            elif 'tiktok.com' in post['link'].lower():
+                platform = 'TikTok'
+            elif 'facebook.com' in post['link'].lower():
+                platform = 'Facebook'
+            elif 'youtube.com' in post['link'].lower() or 'youtu.be' in post['link'].lower():
+                platform = 'YouTube'
+            
+            link_display = f'<br><small style="color: #2196F3;"><i class="fab fa-{platform.lower()}"></i> {platform}</small>'
+        
+        rows_html += f'''
+        <tr>
+            <td>
+                {post['title'][:50] + ('...' if len(post['title']) > 50 else '')}
+                {link_display}
+            </td>
+            <td>
+                <span class="badge {performance_color}">
+                    {performance_text}
+                </span>
+            </td>
+            <td>{post['type'].capitalize()}</td>
+            <td>{engagement_str}</td>
+            <td>
+                {f"{post['reach']:,.0f}" if post['reach'] > 0 else 'N/A'}
+                <br><small style="color: #666;">Reach</small>
+            </td>
+            <td>
+                {f"{post['views']:,.0f}" if post['views'] > 0 else 'N/A'}
+                <br><small style="color: #666;">Views</small>
+            </td>
+            <td>{post['date']}</td>
+        </tr>
+        '''
+    
+    return rows_html if rows_html else '<tr><td colspan="7" style="text-align: center; padding: 40px;">No post data available</td></tr>'
+
 
 def create_social_media_dashboard(excel_file_path, output_folder=None, open_in_browser=True):
     """
@@ -541,7 +710,7 @@ def create_social_media_dashboard(excel_file_path, output_folder=None, open_in_b
         print(f"  ❌ Failed to read Excel file: {e}")
         return None
     
-    # Calculate analytics
+    # Calculate analytics with new structure
     print(f"  📈 Calculating analytics...")
     analytics_data = calculate_social_analytics(posts_df)
     
@@ -563,21 +732,20 @@ def create_social_media_dashboard(excel_file_path, output_folder=None, open_in_b
     # Generate dashboard HTML
     print(f"  🎨 Generating interactive dashboard...")
     try:
-        dashboard_path = generate_social_dashboard_html(analytics_data, dashboard_path)
+        dashboard_html = generate_enhanced_social_html(analytics_data, posts_df)
         
-        if dashboard_path is None:
-            print(f"  ❌ Dashboard generation failed")
-            return None
-            
-        print(f"\n✅ Dashboard created successfully!")
+        with open(dashboard_path, 'w', encoding='utf-8') as f:
+            f.write(dashboard_html)
+        
+        print(f"  ✅ Dashboard created successfully!")
         print(f"   📊 Dashboard: {dashboard_path}")
         print(f"   📈 Total Posts: {analytics_data['_metadata']['posts_count']}")
         
         # Open in browser if requested
         if open_in_browser and os.path.exists(dashboard_path):
             try:
+                import webbrowser
                 print(f"  🌐 Opening dashboard in browser...")
-                # Convert to file URL
                 file_url = f"file://{os.path.abspath(dashboard_path)}"
                 webbrowser.open(file_url)
                 print(f"  ✅ Dashboard opened in browser")
@@ -593,9 +761,1421 @@ def create_social_media_dashboard(excel_file_path, output_folder=None, open_in_b
     
     return dashboard_path
 
+
+def generate_enhanced_social_html(analytics_data, posts_df):
+    """
+    Generate enhanced HTML dashboard for social media analytics using attendance dashboard patterns.
+    """
+    # Extract data
+    overview = analytics_data.get('overview_stats', {})
+    performance = analytics_data.get('performance_analysis', {})
+    trends = analytics_data.get('engagement_trends', {})
+    platforms = analytics_data.get('platform_analysis', {})
+    post_details = analytics_data.get('post_details', [])
+    metadata = analytics_data.get('_metadata', {})
+    
+    # Generate insights
+    insights = generate_social_insights(analytics_data)
+    insights_html = generate_insights_html(insights)
+    
+    # Create JSON for JavaScript
+    try:
+        analytics_json = json.dumps(analytics_data, cls=EnhancedJSONEncoder)
+    except Exception as e:
+        safe_data = serialize_for_json(analytics_data)
+        analytics_json = json.dumps(safe_data, default=str)
+    
+    # Generate posts table
+    posts_table_html = generate_posts_table_rows(post_details)
+    
+    # Get top performers
+    top_performers = sorted(post_details, key=lambda x: x['engagement'], reverse=True)[:5]
+    low_performers = sorted(post_details, key=lambda x: x['engagement'])[:5]
+    
+    # Time period
+    time_period = metadata.get('time_period', {})
+    period_text = f"{time_period.get('start', 'N/A')} to {time_period.get('end', 'N/A')}"
+    
+    # Build platform cards HTML
+    platform_cards_html = ''
+    if platforms:
+        for platform, data in platforms.items():
+            if platform != 'Unknown' and platform != 'Other' and data:
+                platform_cards_html += f'''
+                    <div class="platform-card">
+                        <div class="platform-icon {platform.lower()}">
+                            <i class="fab fa-{platform.lower()}"></i>
+                        </div>
+                        <h3>{platform}</h3>
+                        <div style="font-size: 2rem; font-weight: 700; margin: 10px 0;">
+                            {data.get('avg_engagement', 0):,.0f}
+                        </div>
+                        <div style="color: #666; font-size: 0.9rem;">
+                            {data.get('post_count', 0)} posts
+                        </div>
+                        <div style="color: #666; font-size: 0.9rem; margin-top: 5px;">
+                            Total: {data.get('total_engagement', 0):,.0f} engagement
+                        </div>
+                    </div>
+                '''
+    
+    # Build top performers table rows
+    top_performers_html = ''
+    for post in top_performers:
+        top_performers_html += f'''
+            <tr>
+                <td>{post["title"]}</td>
+                <td>{post["type"].capitalize()}</td>
+                <td><strong>{post["engagement"]}</strong></td>
+                <td>{post["date"]}</td>
+            </tr>
+        '''
+    
+    # Build low performers table rows
+    low_performers_html = ''
+    for post in low_performers:
+        priority = "High" if post["engagement"] < 100 else "Medium"
+        low_performers_html += f'''
+            <tr>
+                <td>{post["title"]}</td>
+                <td>{post["type"].capitalize()}</td>
+                <td>{post["engagement"]}</td>
+                <td><span class="badge badge-danger">{priority}</span></td>
+            </tr>
+        '''
+    
+    # Generate HTML
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Analytics Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {{
+            --primary-color: #2196F3;
+            --success-color: #4CAF50;
+            --warning-color: #FF9800;
+            --danger-color: #F44336;
+            --instagram-color: #E1306C;
+            --facebook-color: #4267B2;
+            --tiktok-color: #000000;
+            --youtube-color: #FF0000;
+            --twitter-color: #1DA1F2;
+            --dark-color: #2c3e50;
+            --light-color: #f5f7fa;
+        }}
+        
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--light-color);
+            color: var(--dark-color);
+            min-height: 100vh;
+            transition: all 0.3s;
+        }}
+        
+        /* Dark Mode Styles */
+        body.dark-mode {{
+            background: #1a1a1a;
+            color: #e2e8f0;
+        }}
+        
+        .dark-mode .sidebar {{
+            background: #252525;
+        }}
+        
+        .dark-mode .sidebar-header {{
+            background: linear-gradient(135deg, var(--primary-color), #1976D2);
+        }}
+        
+        .dark-mode .nav-item {{
+            color: #cbd5e0;
+        }}
+        
+        .dark-mode .nav-item:hover {{
+            background: rgba(255, 255, 255, 0.1);
+        }}
+        
+        .dark-mode .nav-item.active {{
+            background: rgba(33, 150, 243, 0.2);
+            color: #90caf9;
+        }}
+        
+        .dark-mode .stat-card,
+        .dark-mode .chart-card,
+        .dark-mode .insight-card,
+        .dark-mode .post-table-container,
+        .dark-mode .comparison-card {{
+            background: #2d3748;
+            color: #e2e8f0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }}
+        
+        .dashboard-container {{
+            display: flex;
+            min-height: 100vh;
+        }}
+        
+        /* Sidebar Navigation */
+        .sidebar {{
+            width: 250px;
+            background: white;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 100;
+        }}
+        
+        .sidebar-header {{
+            padding: 25px;
+            background: linear-gradient(135deg, var(--primary-color), #1976D2);
+            color: white;
+            text-align: center;
+        }}
+        
+        .sidebar-header h2 {{
+            font-size: 1.4rem;
+            margin-bottom: 5px;
+        }}
+        
+        .sidebar-header p {{
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }}
+        
+        .nav-menu {{
+            padding: 20px 0;
+        }}
+        
+        .nav-item {{
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 4px solid transparent;
+            text-decoration: none;
+            color: var(--dark-color);
+        }}
+        
+        .nav-item:hover {{
+            background: rgba(33, 150, 243, 0.1);
+            border-left: 4px solid var(--primary-color);
+        }}
+        
+        .nav-item.active {{
+            background: rgba(33, 150, 243, 0.15);
+            border-left: 4px solid var(--primary-color);
+            color: var(--primary-color);
+            font-weight: 600;
+        }}
+        
+        .nav-item i {{
+            font-size: 1.2rem;
+            width: 24px;
+        }}
+        
+        /* Main Content */
+        .main-content {{
+            flex: 1;
+            margin-left: 250px;
+            padding: 25px;
+        }}
+        
+        /* Dark Mode Toggle Button */
+        .dark-mode-toggle {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: white;
+            color: #333;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }}
+        
+        .dark-mode .dark-mode-toggle {{
+            background: #4a5568;
+            color: #e2e8f0;
+        }}
+        
+        /* Page Content */
+        .page {{
+            display: none;
+            animation: fadeIn 0.5s;
+        }}
+        
+        .page.active {{
+            display: block;
+        }}
+        
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(10px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        
+        /* Stats Grid */
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        
+        .stat-card {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            text-align: center;
+            transition: transform 0.3s;
+        }}
+        
+        .stat-card:hover {{
+            transform: translateY(-5px);
+        }}
+        
+        .stat-card.success {{ border-top: 5px solid var(--success-color); }}
+        .stat-card.warning {{ border-top: 5px solid var(--warning-color); }}
+        .stat-card.danger {{ border-top: 5px solid var(--danger-color); }}
+        .stat-card.info {{ border-top: 5px solid var(--primary-color); }}
+        
+        .stat-icon {{
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }}
+        
+        .stat-value {{
+            font-size: 2.8rem;
+            font-weight: 700;
+            margin: 10px 0;
+        }}
+        
+        .stat-label {{
+            color: #7f8c8d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        
+        .stat-subtext {{
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 8px;
+        }}
+        
+        /* Charts */
+        .charts-container {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }}
+        
+        .chart-card {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        }}
+        
+        .chart-title {{
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: var(--dark-color);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        
+        .chart-container {{
+            width: 100%;
+            height: 350px;
+        }}
+        
+        /* Insights Container */
+        .insights-container {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            margin-bottom: 30px;
+        }}
+        
+        .insight-card {{
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            border-left: 5px solid var(--primary-color);
+        }}
+        
+        .insight-title {{
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        
+        /* Posts Table */
+        .post-table-container {{
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            overflow: hidden;
+            margin-bottom: 30px;
+            max-height: 500px;
+            overflow-y: auto;
+        }}
+        
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        
+        th {{
+            background: linear-gradient(135deg, var(--primary-color), #1976D2);
+            color: white;
+            padding: 18px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }}
+        
+        td {{
+            padding: 16px;
+            border-bottom: 1px solid #eee;
+        }}
+        
+        tr:hover {{
+            background: rgba(33, 150, 243, 0.05);
+        }}
+        
+        .badge {{
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }}
+        
+        .badge-success {{ background: #E8F5E9; color: var(--success-color); }}
+        .badge-warning {{ background: #FFF3E0; color: var(--warning-color); }}
+        .badge-danger {{ background: #FFEBEE; color: var(--danger-color); }}
+        .badge-info {{ background: #E3F2FD; color: var(--primary-color); }}
+        
+        /* Platform Cards */
+        .platform-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        
+        .platform-card {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+            transition: transform 0.3s;
+        }}
+        
+        .platform-card:hover {{
+            transform: translateY(-5px);
+        }}
+        
+        .platform-icon {{
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }}
+        
+        .instagram {{ color: var(--instagram-color); }}
+        .facebook {{ color: var(--facebook-color); }}
+        .tiktok {{ color: var(--tiktok-color); }}
+        .youtube {{ color: var(--youtube-color); }}
+        .twitter {{ color: var(--twitter-color); }}
+        
+        /* Performance Comparison */
+        .comparison-container {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        
+        .comparison-card {{
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+        }}
+        
+        .comparison-table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }}
+        
+        .comparison-table th {{
+            background: #f8f9fa;
+            color: #333;
+            padding: 12px;
+            font-size: 0.9rem;
+        }}
+        
+        .comparison-table td {{
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+        }}
+        
+        /* Search and Filter */
+        .search-filter-container {{
+            margin: 20px 0;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }}
+        
+        .filter-chip {{
+            cursor: pointer;
+            background: var(--primary-color);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+        }}
+        
+        .filter-chip:hover {{
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }}
+        
+        /* Mobile menu button */
+        .mobile-menu-btn {{
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2rem;
+        }}
+        
+        /* Responsive */
+        @media (max-width: 992px) {{
+            .sidebar {{
+                width: 70px;
+            }}
+            
+            .sidebar-header h2,
+            .sidebar-header p,
+            .nav-item span {{
+                display: none;
+            }}
+            
+            .nav-item {{
+                justify-content: center;
+                padding: 20px;
+            }}
+            
+            .main-content {{
+                margin-left: 70px;
+            }}
+        }}
+        
+        @media (max-width: 768px) {{
+            .stats-grid,
+            .charts-container,
+            .platform-grid,
+            .comparison-container {{
+                grid-template-columns: 1fr;
+            }}
+            
+            .main-content {{
+                padding: 15px;
+            }}
+            
+            .sidebar {{
+                display: none;
+                width: 100%;
+                position: fixed;
+                z-index: 999;
+            }}
+            
+            .main-content {{
+                margin-left: 0;
+            }}
+            
+            .mobile-menu-btn {{
+                display: block;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <!-- Dark Mode Toggle -->
+    <button class="dark-mode-toggle" id="dark-mode-toggle">
+        <i class="fas fa-moon"></i> Dark Mode
+    </button>
+    
+    <button class="mobile-menu-btn" onclick="toggleSidebar()">
+        <i class="fas fa-bars"></i>
+    </button>
+    
+    <div class="dashboard-container">
+        <!-- Sidebar Navigation -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2>📊 Analytics</h2>
+                <p>Social Media Dashboard</p>
+            </div>
+            
+            <div class="nav-menu">
+                <a href="#overview" class="nav-item active" onclick="showPage('overview')">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Overview</span>
+                </a>
+                
+                <a href="#performance" class="nav-item" onclick="showPage('performance')">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>Performance</span>
+                </a>
+                
+                <a href="#trends" class="nav-item" onclick="showPage('trends')">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Trends</span>
+                </a>
+                
+                <a href="#platforms" class="nav-item" onclick="showPage('platforms')">
+                    <i class="fas fa-globe"></i>
+                    <span>Platforms</span>
+                </a>
+                
+                <a href="#posts" class="nav-item" onclick="showPage('posts')">
+                    <i class="fas fa-list-alt"></i>
+                    <span>All Posts</span>
+                </a>
+            </div>
+            
+            <div style="padding: 20px; color: #666; font-size: 0.9rem; text-align: center;">
+                <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+                <p>Posts: {overview.get('total_posts', 0)}</p>
+            </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Overview Page -->
+            <div id="overview" class="page active">
+                <h1 style="margin-bottom: 25px; color: var(--dark-color);">
+                    <i class="fas fa-chart-line"></i> Social Media Overview
+                </h1>
+                
+                <!-- Automated Insights -->
+                <div class="insights-container">
+                    <h3><i class="fas fa-lightbulb"></i> Automated Insights</h3>
+                    <div id="insights-list">
+                        {insights_html}
+                    </div>
+                </div>
+                
+                <!-- Statistics Cards -->
+                <div class="stats-grid">
+                    <div class="stat-card info">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-value">{overview.get('total_posts', 0):,}</div>
+                        <div class="stat-label">Total Posts</div>
+                        <div class="stat-subtext">
+                            {overview.get('video_posts', 0)} videos, {overview.get('image_posts', 0)} images
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card success">
+                        <div class="stat-icon">🏆</div>
+                        <div class="stat-value">{overview.get('high_performing_posts', 0)}</div>
+                        <div class="stat-label">High Performing</div>
+                        <div class="stat-subtext">
+                            {overview.get('high_performing_pct', 0):.1f}% of total posts
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid #FF9800;">
+                        <div class="stat-icon">📈</div>
+                        <div class="stat-value">{overview.get('avg_engagement', 0):,.0f}</div>
+                        <div class="stat-label">Avg Engagement</div>
+                        <div class="stat-subtext">
+                            Per post average
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid #4CAF50;">
+                        <div class="stat-icon">🎯</div>
+                        <div class="stat-value">{overview.get('overall_engagement_rate', 0):.1f}%</div>
+                        <div class="stat-label">Engagement Rate</div>
+                        <div class="stat-subtext">
+                            Industry avg: 1-3%
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Performance Comparison -->
+                <div class="comparison-container">
+                    <div class="comparison-card">
+                        <h3><i class="fas fa-trophy"></i> Top 5 Performing Posts</h3>
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>Post</th>
+                                    <th>Type</th>
+                                    <th>Engagement</th>
+                                    <th>Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {top_performers_html}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="comparison-card">
+                        <h3><i class="fas fa-exclamation-triangle"></i> Need Improvement</h3>
+                        <table class="comparison-table">
+                            <thead>
+                                <tr>
+                                    <th>Post</th>
+                                    <th>Type</th>
+                                    <th>Engagement</th>
+                                    <th>Priority</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {low_performers_html}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- Charts -->
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <div class="chart-title">
+                            <i class="fas fa-chart-pie"></i> Content Type Distribution
+                        </div>
+                        <div class="chart-container" id="overview-chart1"></div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <div class="chart-title">
+                            <i class="fas fa-chart-bar"></i> Top 10 Posts by Engagement
+                        </div>
+                        <div class="chart-container" id="overview-chart2"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Performance Page -->
+            <div id="performance" class="page">
+                <h1 style="margin-bottom: 25px; color: var(--dark-color);">
+                    <i class="fas fa-chart-bar"></i> Performance Analysis
+                </h1>
+                
+                <div class="charts-container">
+                    <div class="chart-card">
+                        <div class="chart-title">
+                            <i class="fas fa-chart-line"></i> Video vs Post Performance
+                        </div>
+                        <div class="chart-container" id="performance-chart1"></div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <div class="chart-title">
+                            <i class="fas fa-fire"></i> Engagement Distribution
+                        </div>
+                        <div class="chart-container" id="performance-chart2"></div>
+                    </div>
+                </div>
+                
+                <!-- Performance Metrics -->
+                <div class="stats-grid">
+                    <div class="stat-card" style="border-top: 5px solid #2196F3;">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-value">{performance.get('total_engagement', 0):,.0f}</div>
+                        <div class="stat-label">Total Engagement</div>
+                        <div class="stat-subtext">All posts combined</div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid #4CAF50;">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-value">{performance.get('max_engagement', 0):,.0f}</div>
+                        <div class="stat-label">Max Engagement</div>
+                        <div class="stat-subtext">Best performing post</div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid #FF9800;">
+                        <div class="stat-icon">📈</div>
+                        <div class="stat-value">{performance.get('avg_engagement_by_type', {}).get('video', 0):,.0f}</div>
+                        <div class="stat-label">Avg Video Engagement</div>
+                        <div class="stat-subtext">Video content performance</div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid #F44336;">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-value">{performance.get('avg_engagement_by_type', {}).get('post', 0):,.0f}</div>
+                        <div class="stat-label">Avg Post Engagement</div>
+                        <div class="stat-subtext">Image/Post performance</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Trends Page -->
+            <div id="trends" class="page">
+                <h1 style="margin-bottom: 25px; color: var(--dark-color);">
+                    <i class="fas fa-chart-line"></i> Engagement Trends
+                </h1>
+                
+                <div class="chart-card" style="margin-bottom: 30px;">
+                    <div class="chart-title">
+                        <i class="fas fa-chart-line"></i> Daily Engagement Trend
+                    </div>
+                    <div class="chart-container" id="trends-chart1"></div>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card" style="border-top: 5px solid var(--primary-color);">
+                        <div class="stat-icon">📅</div>
+                        <div class="stat-value">{len(trends.get('daily', {}).get('dates', []))}</div>
+                        <div class="stat-label">Days Analyzed</div>
+                        <div class="stat-subtext">
+                            {period_text}
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card" style="border-top: 5px solid var(--success-color);">
+                        <div class="stat-icon">⭐</div>
+                        <div class="stat-value">{trends.get('best_day', 'N/A')}</div>
+                        <div class="stat-label">Best Day to Post</div>
+                        <div class="stat-subtext">
+                            Highest avg engagement
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Platforms Page -->
+            <div id="platforms" class="page">
+                <h1 style="margin-bottom: 25px; color: var(--dark-color);">
+                    <i class="fas fa-globe"></i> Platform Analysis
+                </h1>
+                
+                <div class="platform-grid">
+                    {platform_cards_html}
+                </div>
+                
+                <div class="chart-card">
+                    <div class="chart-title">
+                        <i class="fas fa-chart-pie"></i> Platform Distribution by Engagement
+                    </div>
+                    <div class="chart-container" id="platforms-chart1"></div>
+                </div>
+            </div>
+            
+            <!-- All Posts Page -->
+            <div id="posts" class="page">
+                <h1 style="margin-bottom: 25px; color: var(--dark-color);">
+                    <i class="fas fa-list-alt"></i> All Posts ({overview.get('total_posts', 0)})
+                </h1>
+                
+                <!-- Search and Filter -->
+                <div class="search-filter-container">
+                    <div style="position: relative; flex: 1; min-width: 250px;">
+                        <input type="text" id="post-search" placeholder="Search posts..." 
+                               style="width: 100%; padding: 12px 40px 12px 15px; border: 2px solid #ddd; border-radius: 25px; font-size: 16px;">
+                        <i class="fas fa-search" style="position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: #666;"></i>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <select id="filter-type" style="padding: 10px 15px; border: 2px solid #ddd; border-radius: 8px;">
+                            <option value="all">All Types</option>
+                            <option value="video">Video</option>
+                            <option value="post">Post</option>
+                        </select>
+                        
+                        <select id="filter-performance" style="padding: 10px 15px; border: 2px solid #ddd; border-radius: 8px;">
+                            <option value="all">All Performance</option>
+                            <option value="high">High Performing</option>
+                            <option value="medium">Medium Performing</option>
+                            <option value="low">Low Performing</option>
+                        </select>
+                        
+                        <select id="sort-by" style="padding: 10px 15px; border: 2px solid #ddd; border-radius: 8px;">
+                            <option value="engagement_desc">Engagement (High to Low)</option>
+                            <option value="engagement_asc">Engagement (Low to High)</option>
+                            <option value="date_desc">Date (Newest)</option>
+                            <option value="date_asc">Date (Oldest)</option>
+                            <option value="title">Title (A-Z)</option>
+                        </select>
+                    </div>
+                    
+                    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                        <span class="filter-chip" onclick="setFilter('video')" style="background: #F44336;">
+                            <i class="fas fa-video"></i> Videos
+                        </span>
+                        <span class="filter-chip" onclick="setFilter('post')" style="background: #2196F3;">
+                            <i class="fas fa-image"></i> Posts
+                        </span>
+                        <span class="filter-chip" onclick="setFilter('high')" style="background: #4CAF50;">
+                            <i class="fas fa-trophy"></i> High Performing
+                        </span>
+                        <button onclick="clearFilters()" style="background: #666; color: white; border: none; padding: 6px 12px; border-radius: 16px; cursor: pointer; font-size: 0.85rem;">
+                            <i class="fas fa-times"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="post-count" style="margin: 10px 0 20px 0; color: #666; font-size: 0.9rem;">
+                    Showing {len(post_details)} of {overview.get('total_posts', 0)} posts
+                </div>
+                
+                <!-- Posts Table -->
+                <div class="post-table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Post Title</th>
+                                <th>Performance</th>
+                                <th>Type</th>
+                                <th>Engagement</th>
+                                <th>Reach</th>
+                                <th>Views</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="post-table-body">
+                            {posts_table_html}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Analytics data
+        const analyticsData = {analytics_json};
+        
+        // Store post data globally for filtering
+        window.postDetailsData = analyticsData.post_details || [];
+        
+        // Dark Mode
+        const darkModeToggle = document.getElementById('dark-mode-toggle');
+        let darkMode = localStorage.getItem('socialDashboardDarkMode') === 'true';
+        
+        function updateDarkMode() {{
+            document.body.classList.toggle('dark-mode', darkMode);
+            if (darkMode) {{
+                darkModeToggle.innerHTML = '<i class="fas fa-sun"></i> Light Mode';
+            }} else {{
+                darkModeToggle.innerHTML = '<i class="fas fa-moon"></i> Dark Mode';
+            }}
+            localStorage.setItem('socialDashboardDarkMode', darkMode);
+        }}
+        
+        darkModeToggle.addEventListener('click', () => {{
+            darkMode = !darkMode;
+            updateDarkMode();
+        }});
+        
+        // Initialize dark mode
+        updateDarkMode();
+        
+        // Navigation
+        function showPage(pageId) {{
+            // Hide all pages
+            document.querySelectorAll('.page').forEach(page => {{
+                page.classList.remove('active');
+            }});
+            
+            // Remove active class from all nav items
+            document.querySelectorAll('.nav-item').forEach(item => {{
+                item.classList.remove('active');
+            }});
+            
+            // Show selected page
+            document.getElementById(pageId).classList.add('active');
+            
+            // Add active class to clicked nav item
+            event.target.closest('.nav-item').classList.add('active');
+            
+            // Close mobile sidebar if open
+            if (window.innerWidth <= 768) {{
+                document.getElementById('sidebar').style.display = 'none';
+            }}
+            
+            // Initialize charts for the page
+            setTimeout(() => initializePageCharts(pageId), 100);
+        }}
+        
+        function toggleSidebar() {{
+            const sidebar = document.getElementById('sidebar');
+            sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none';
+        }}
+        
+        // Initialize page-specific charts
+        function initializePageCharts(pageId) {{
+            switch(pageId) {{
+                case 'overview':
+                    createOverviewCharts();
+                    break;
+                case 'performance':
+                    createPerformanceCharts();
+                    break;
+                case 'trends':
+                    createTrendCharts();
+                    break;
+                case 'platforms':
+                    createPlatformCharts();
+                    break;
+                case 'posts':
+                    setupPostSearchFilter();
+                    break;
+            }}
+        }}
+        
+        // Overview Charts
+        function createOverviewCharts() {{
+            const overview = analyticsData.overview_stats;
+            
+            // Chart 1: Content Type Distribution
+            const contentData = [{{
+                values: [overview.video_posts || 0, overview.image_posts || 0],
+                labels: ['Video Posts', 'Image Posts'],
+                type: 'pie',
+                hole: 0.4,
+                marker: {{
+                    colors: ['#F44336', '#2196F3']
+                }},
+                textinfo: 'percent+label',
+                hoverinfo: 'label+percent+value'
+            }}];
+            
+            Plotly.newPlot('overview-chart1', contentData, {{
+                height: 320,
+                margin: {{t: 20, b: 20, l: 20, r: 20}},
+                showlegend: true,
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent',
+                legend: {{
+                    orientation: 'h',
+                    y: -0.1
+                }}
+            }}, {{displayModeBar: false}});
+            
+            // Chart 2: Top 10 Posts by Engagement
+            const postDetails = analyticsData.post_details || [];
+            const topPosts = [...postDetails]
+                .sort((a, b) => b.engagement - a.engagement)
+                .slice(0, 10);
+            
+            const postTitles = topPosts.map(p => {{
+                const title = p.title.length > 20 ? p.title.substring(0, 17) + '...' : p.title;
+                return title + (p.is_video ? ' 🎥' : ' 📸');
+            }});
+            
+            const postEngagements = topPosts.map(p => p.engagement);
+            
+            const barColors = topPosts.map(p => p.is_video ? '#F44336' : '#2196F3');
+            
+            const data2 = [{{
+                y: postTitles,
+                x: postEngagements,
+                type: 'bar',
+                orientation: 'h',
+                marker: {{
+                    color: barColors,
+                    line: {{
+                        color: '#333',
+                        width: 1
+                    }}
+                }},
+                text: postEngagements.map(e => e.toLocaleString()),
+                textposition: 'auto'
+            }}];
+            
+            Plotly.newPlot('overview-chart2', data2, {{
+                height: 320,
+                margin: {{l: 200, r: 30, t: 20, b: 50}},
+                xaxis: {{title: 'Engagement'}},
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent'
+            }}, {{displayModeBar: false}});
+        }}
+        
+        // Performance Charts
+        function createPerformanceCharts() {{
+            const performance = analyticsData.performance_analysis;
+            
+            // Chart 1: Video vs Post Performance
+            const avgVideo = performance.avg_engagement_by_type?.video || 0;
+            const avgPost = performance.avg_engagement_by_type?.post || 0;
+            
+            const comparisonData = [{{
+                x: ['Video', 'Post'],
+                y: [avgVideo, avgPost],
+                type: 'bar',
+                marker: {{
+                    color: ['#F44336', '#2196F3']
+                }},
+                text: [avgVideo.toLocaleString(), avgPost.toLocaleString()],
+                textposition: 'auto'
+            }}];
+            
+            Plotly.newPlot('performance-chart1', comparisonData, {{
+                height: 320,
+                margin: {{t: 20, b: 50, l: 50, r: 30}},
+                xaxis: {{title: 'Content Type'}},
+                yaxis: {{title: 'Average Engagement'}},
+                paper_bgcolor: 'transparent',
+                plot_bgcolor: 'transparent'
+            }}, {{displayModeBar: false}});
+            
+            // Chart 2: Engagement Distribution
+            const postDetails = analyticsData.post_details || [];
+            const engagements = postDetails.map(p => p.engagement).filter(e => e > 0);
+            
+            if (engagements.length > 0) {{
+                const histogramData = [{{
+                    x: engagements,
+                    type: 'histogram',
+                    marker: {{
+                        color: '#4CAF50'
+                    }},
+                    nbinsx: 20
+                }}];
+                
+                Plotly.newPlot('performance-chart2', histogramData, {{
+                    height: 320,
+                    margin: {{t: 20, b: 50, l: 50, r: 30}},
+                    xaxis: {{title: 'Engagement'}},
+                    yaxis: {{title: 'Number of Posts'}},
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent'
+                }}, {{displayModeBar: false}});
+            }}
+        }}
+        
+        // Trend Charts
+        function createTrendCharts() {{
+            const trends = analyticsData.engagement_trends?.daily || {{dates: [], engagements: []}};
+            
+            if (trends.dates.length > 0) {{
+                const trace1 = {{
+                    x: trends.dates,
+                    y: trends.engagements,
+                    mode: 'lines+markers',
+                    name: 'Daily Engagement',
+                    line: {{color: '#2196F3', width: 2}},
+                    marker: {{size: 6, color: '#2196F3'}}
+                }};
+                
+                let movingAvgTrace = null;
+                if (trends.engagements.length >= 3) {{
+                    const movingAvg = calculateMovingAverage(trends.engagements, 3);
+                    movingAvgTrace = {{
+                        x: trends.dates.slice(2),
+                        y: movingAvg,
+                        mode: 'lines',
+                        name: '3-Day Avg',
+                        line: {{color: '#4CAF50', width: 4, dash: 'dot'}},
+                        hoverinfo: 'none'
+                    }};
+                }}
+                
+                const data = movingAvgTrace ? [trace1, movingAvgTrace] : [trace1];
+                
+                Plotly.newPlot('trends-chart1', data, {{
+                    height: 320,
+                    margin: {{t: 20, b: 50, l: 50, r: 30}},
+                    xaxis: {{
+                        title: 'Date',
+                        tickangle: 45
+                    }},
+                    yaxis: {{title: 'Engagement'}},
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent',
+                    hovermode: 'closest',
+                    showlegend: true,
+                    legend: {{
+                        orientation: 'h',
+                        y: -0.2
+                    }}
+                }}, {{displayModeBar: false}});
+            }}
+        }}
+        
+        function calculateMovingAverage(data, windowSize) {{
+            const movingAvg = [];
+            for (let i = 0; i <= data.length - windowSize; i++) {{
+                const sum = data.slice(i, i + windowSize).reduce((a, b) => a + b, 0);
+                movingAvg.push(sum / windowSize);
+            }}
+            return movingAvg;
+        }}
+        
+        // Platform Charts
+        function createPlatformCharts() {{
+            const platforms = analyticsData.platform_analysis || {{}};
+            
+            const platformNames = [];
+            const platformEngagements = [];
+            const platformColors = [];
+            
+            for (const [platform, data] of Object.entries(platforms)) {{
+                if (platform !== 'Unknown' && platform !== 'Other' && data.avg_engagement > 0) {{
+                    platformNames.push(platform);
+                    platformEngagements.push(data.total_engagement || 0);
+                    
+                    const colorMap = {{
+                        'Instagram': '#E1306C',
+                        'Facebook': '#4267B2',
+                        'TikTok': '#000000',
+                        'YouTube': '#FF0000',
+                        'Twitter': '#1DA1F2'
+                    }};
+                    platformColors.push(colorMap[platform] || '#666');
+                }}
+            }}
+            
+            if (platformNames.length > 0) {{
+                const platformData = [{{
+                    values: platformEngagements,
+                    labels: platformNames,
+                    type: 'pie',
+                    hole: 0.3,
+                    marker: {{
+                        colors: platformColors
+                    }},
+                    textinfo: 'percent+label',
+                    hoverinfo: 'label+percent+value'
+                }}];
+                
+                Plotly.newPlot('platforms-chart1', platformData, {{
+                    height: 320,
+                    margin: {{t: 20, b: 20, l: 20, r: 20}},
+                    showlegend: true,
+                    paper_bgcolor: 'transparent',
+                    plot_bgcolor: 'transparent'
+                }}, {{displayModeBar: false}});
+            }}
+        }}
+        
+        // Post Search and Filter
+        function setupPostSearchFilter() {{
+            const searchInput = document.getElementById('post-search');
+            const typeSelect = document.getElementById('filter-type');
+            const performanceSelect = document.getElementById('filter-performance');
+            const sortSelect = document.getElementById('sort-by');
+            
+            searchInput.addEventListener('input', filterPosts);
+            typeSelect.addEventListener('change', filterPosts);
+            performanceSelect.addEventListener('change', filterPosts);
+            sortSelect.addEventListener('change', filterPosts);
+            
+            filterPosts();
+        }}
+        
+        function setFilter(filterType) {{
+            if (filterType === 'video' || filterType === 'post') {{
+                document.getElementById('filter-type').value = filterType;
+            }} else if (['high', 'medium', 'low'].includes(filterType)) {{
+                document.getElementById('filter-performance').value = filterType;
+            }}
+            filterPosts();
+        }}
+        
+        function clearFilters() {{
+            document.getElementById('post-search').value = '';
+            document.getElementById('filter-type').value = 'all';
+            document.getElementById('filter-performance').value = 'all';
+            document.getElementById('sort-by').value = 'engagement_desc';
+            filterPosts();
+        }}
+        
+        function filterPosts() {{
+            const searchTerm = document.getElementById('post-search').value.toLowerCase();
+            const typeFilter = document.getElementById('filter-type').value;
+            const performanceFilter = document.getElementById('filter-performance').value;
+            const sortBy = document.getElementById('sort-by').value;
+            const postDetails = window.postDetailsData || [];
+            
+            const filteredPosts = postDetails.filter(post => {{
+                // Search filter
+                const matchesSearch = post.title.toLowerCase().includes(searchTerm) || 
+                                     post.type.toLowerCase().includes(searchTerm);
+                
+                // Type filter
+                let matchesType = true;
+                if (typeFilter === 'video') {{
+                    matchesType = post.is_video;
+                }} else if (typeFilter === 'post') {{
+                    matchesType = !post.is_video;
+                }}
+                
+                // Performance filter
+                let matchesPerformance = true;
+                if (performanceFilter === 'high') {{
+                    matchesPerformance = post.performance_category === 'high_performing';
+                }} else if (performanceFilter === 'medium') {{
+                    matchesPerformance = post.performance_category === 'medium_performing';
+                }} else if (performanceFilter === 'low') {{
+                    matchesPerformance = post.performance_category === 'low_performing';
+                }}
+                
+                return matchesSearch && matchesType && matchesPerformance;
+            }});
+            
+            // Sort the filtered posts
+            let sortedPosts = [...filteredPosts];
+            
+            switch(sortBy) {{
+                case 'engagement_desc':
+                    sortedPosts.sort((a, b) => b.engagement - a.engagement);
+                    break;
+                case 'engagement_asc':
+                    sortedPosts.sort((a, b) => a.engagement - b.engagement);
+                    break;
+                case 'date_desc':
+                    sortedPosts.sort((a, b) => new Date(b.date) - new Date(a.date));
+                    break;
+                case 'date_asc':
+                    sortedPosts.sort((a, b) => new Date(a.date) - new Date(b.date));
+                    break;
+                case 'title':
+                    sortedPosts.sort((a, b) => a.title.localeCompare(b.title));
+                    break;
+            }}
+            
+            populateFilteredPostTable(sortedPosts);
+            updatePostCount(sortedPosts.length);
+        }}
+        
+        function populateFilteredPostTable(filteredPosts) {{
+            const tableBody = document.getElementById('post-table-body');
+            tableBody.innerHTML = '';
+            
+            filteredPosts.forEach(post => {{
+                // Determine performance badge
+                let performanceClass, performanceText;
+                if (post.performance_category === 'high_performing') {{
+                    performanceClass = 'badge-success';
+                    performanceText = 'High';
+                }} else if (post.performance_category === 'medium_performing') {{
+                    performanceClass = 'badge-warning';
+                    performanceText = 'Medium';
+                }} else {{
+                    performanceClass = 'badge-danger';
+                    performanceText = 'Low';
+                }}
+                
+                // Format engagement number
+                const engagementStr = post.engagement > 0 ? post.engagement.toLocaleString() : '0';
+                
+                // Create link display
+                let linkDisplay = '';
+                if (post.has_link) {{
+                    let platform = 'Link';
+                    if (post.link.includes('instagram.com')) platform = 'Instagram';
+                    else if (post.link.includes('tiktok.com')) platform = 'TikTok';
+                    else if (post.link.includes('facebook.com')) platform = 'Facebook';
+                    else if (post.link.includes('youtube.com') || post.link.includes('youtu.be')) platform = 'YouTube';
+                    else if (post.link.includes('twitter.com') || post.link.includes('x.com')) platform = 'Twitter';
+                    
+                    linkDisplay = `<br><small style="color: #2196F3;"><i class="fab fa-${{platform.toLowerCase()}}"></i> ${{platform}}</small>`;
+                }}
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>
+                        ${'{post.title.length > 50 ? post.title.substring(0, 47) + "..." : post.title}'}
+                        ${'{linkDisplay}'}
+                    </td>
+                    <td>
+                        <span class="badge ${'{performanceClass}'}">
+                            ${'{performanceText}'}
+                        </span>
+                    </td>
+                    <td>${'{post.type.charAt(0).toUpperCase() + post.type.slice(1)}'}</td>
+                    <td><strong>${'{engagementStr}'}</strong></td>
+                    <td>
+                        ${'{post.reach > 0 ? post.reach.toLocaleString() : "N/A"}'}
+                        <br><small style="color: #666;">Reach</small>
+                    </td>
+                    <td>
+                        ${'{post.views > 0 ? post.views.toLocaleString() : "N/A"}'}
+                        <br><small style="color: #666;">Views</small>
+                    </td>
+                    <td>${'{post.date}'}</td>
+                `;
+                
+                tableBody.appendChild(row);
+            }});
+        }}
+        
+        function updatePostCount(count) {{
+            const counter = document.getElementById('post-count');
+            if (counter) {{
+                const total = window.postDetailsData.length;
+                counter.textContent = `Showing ${{count}} of ${{total}} posts`;
+            }}
+        }}
+        
+        // Initialize the first page on load
+        window.onload = function() {{
+            showPage('overview');
+            setTimeout(() => {{
+                initializePageCharts('overview');
+            }}, 200);
+        }};
+    </script>
+</body>
+</html>
+'''
+    
+    return html
+
+
 def create_multi_month_social_dashboard(excel_files, output_folder):
     """
-    Create a dashboard comparing multiple months/files.
+    Create a multi-month comparison dashboard for social media.
     """
     print(f"\n📊 Creating Multi-Month Social Media Dashboard...")
     
@@ -630,68 +2210,67 @@ def create_multi_month_social_dashboard(excel_files, output_folder):
     dashboard_dir = os.path.join(output_folder, 'dashboard')
     os.makedirs(dashboard_dir, exist_ok=True)
     
-    dashboard_path = os.path.join(dashboard_dir, 'multi_month_dashboard.html')
+    dashboard_path = os.path.join(dashboard_dir, 'multi_month_comparison_dashboard.html')
     
-    # Generate the HTML content piece by piece to avoid f-string syntax issues
-    html_parts = []
-    html_parts.append('''<!DOCTYPE html>
+    # Build month cards HTML
+    month_cards_html = ''
+    for data in monthly_data:
+        name = data['name']
+        analytics = data['analytics']
+        overview = analytics.get('overview_stats', {})
+        
+        total_posts = overview.get('total_posts', 0)
+        avg_engagement = overview.get('avg_engagement', 0)
+        engagement_rate = overview.get('overall_engagement_rate', 0)
+        video_pct = overview.get('video_percentage', 0)
+        
+        month_cards_html += f'''
+    <div class="month-card">
+        <h3>{name}</h3>
+        <div class="stat">
+            <div class="stat-value">{total_posts:,}</div>
+            <div class="stat-label">Posts</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{avg_engagement:,.0f}</div>
+            <div class="stat-label">Avg Engagement</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{engagement_rate:.1f}%</div>
+            <div class="stat-label">Engagement Rate</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">{video_pct:.1f}%</div>
+            <div class="stat-label">Video Content</div>
+        </div>
+    </div>'''
+    
+    # Generate the HTML
+    html = f'''<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>Multi-Month Social Media Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { font-family: Arial, sans-serif; padding: 20px; }
-        .header { background: #4267B2; color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .month-card { background: white; padding: 15px; border-radius: 8px; margin-bottom: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .stat { display: inline-block; margin: 0 20px 10px 0; }
-        .stat-value { font-size: 24px; font-weight: bold; }
-        .stat-label { color: #666; font-size: 12px; }
+        body {{ font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; }}
+        .header {{ background: linear-gradient(135deg, #4267B2 0%, #E1306C 100%); color: white; padding: 30px; border-radius: 10px; margin-bottom: 30px; }}
+        .month-card {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .stat {{ display: inline-block; margin: 0 20px 10px 0; }}
+        .stat-value {{ font-size: 24px; font-weight: bold; }}
+        .stat-label {{ color: #666; font-size: 12px; }}
+        .chart-container {{ margin: 30px 0; }}
     </style>
 </head>
 <body>
     <div class="header">
         <h1>Multi-Month Social Media Analysis</h1>
-        <p>Comparing ''' + str(len(monthly_data)) + ''' months of data</p>
-    </div>''')
-    
-    # Add each month's data
-    for data in monthly_data:
-        name = data['name']
-        analytics = data['analytics']
-        summary = analytics.get('summary_stats', {})
-        
-        # Format numbers safely
-        total_posts = summary.get('total_posts', 0)
-        avg_engagement = summary.get('avg_engagement', 0)
-        engagement_rate = summary.get('engagement_rate', 0)
-        
-        # Format with thousands separators
-        total_posts_str = f"{total_posts:,}"
-        avg_engagement_str = f"{avg_engagement:,.0f}"
-        engagement_rate_str = f"{engagement_rate:.1f}%"
-        
-        html_parts.append(f'''
-    <div class="month-card">
-        <h3>{name}</h3>
-        <div class="stat">
-            <div class="stat-value">{total_posts_str}</div>
-            <div class="stat-label">Posts</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value">{avg_engagement_str}</div>
-            <div class="stat-label">Avg Engagement</div>
-        </div>
-        <div class="stat">
-            <div class="stat-value">{engagement_rate_str}</div>
-            <div class="stat-label">Engagement Rate</div>
-        </div>
-    </div>''')
-    
-    html_parts.append('''</body>
-</html>''')
-    
-    # Combine all parts
-    html = ''.join(html_parts)
+        <p>Comparing {len(monthly_data)} months of data | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    </div>
+    {month_cards_html}
+</body>
+</html>'''
     
     with open(dashboard_path, 'w', encoding='utf-8') as f:
         f.write(html)
@@ -700,6 +2279,7 @@ def create_multi_month_social_dashboard(excel_files, output_folder):
     
     # Try to open it
     try:
+        import webbrowser
         file_url = f"file://{os.path.abspath(dashboard_path)}"
         webbrowser.open(file_url)
         print(f"  🌐 Opened in browser")
@@ -709,1223 +2289,8 @@ def create_multi_month_social_dashboard(excel_files, output_folder):
     return dashboard_path
 
 
-def generate_social_dashboard_html(analytics_data, output_path):
-    """
-    Generate modern interactive HTML dashboard for social media analytics.
-    """
-    # Extract data
-    summary = analytics_data.get('summary_stats', {})
-    performance = analytics_data.get('performance_analysis', {})
-    trends = analytics_data.get('engagement_trends', {})
-    platforms = analytics_data.get('platform_analysis', {})
-    posts = analytics_data.get('post_details', [])
-    metadata = analytics_data.get('_metadata', {})
-    
-    # Generate insights
-    insights = generate_social_insights(analytics_data)
-    
-    # Convert to JSON for JavaScript
-    analytics_json = json.dumps(analytics_data, cls=EnhancedJSONEncoder)
-    
-    # Generate insights HTML
-    insights_html = ""
-    for insight in insights:
-        # Determine icon based on content
-        icon = "fa-info-circle"
-        color = "#2196F3"
-        if '✅' in insight:
-            icon = "fa-check-circle"
-            color = "#4CAF50"
-        elif '⚠️' in insight or '⚠' in insight:
-            icon = "fa-exclamation-triangle"
-            color = "#FF9800"
-        elif '🎥' in insight:
-            icon = "fa-video"
-            color = "#FF0000"
-        elif '📱' in insight:
-            icon = "fa-mobile-alt"
-            color = "#E1306C"
-        
-        insights_html += f'''
-                <div class="insight-card glass-effect">
-                    <div class="insight-icon">
-                        <i class="fas {icon}" style="color: {color};"></i>
-                    </div>
-                    <div class="insight-content">
-                        <div class="insight-text">{insight}</div>
-                    </div>
-                </div>
-                '''
-    
-    # Format numbers for display
-    total_posts = summary.get('total_posts', 0)
-    avg_engagement = summary.get('avg_engagement', 0)
-    engagement_rate = summary.get('engagement_rate', 0)
-    links_percentage = summary.get('links_percentage', 0)
-    video_posts = summary.get('video_posts', 0)
-    image_posts = summary.get('image_posts', 0)
-    
-    # Time period
-    time_period = metadata.get('time_period', {})
-    period_text = f"{time_period.get('start', 'N/A')} to {time_period.get('end', 'N/A')}"
-    
-    # Generate HTML with modern design
-    html = f'''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Social Media Analytics Dashboard</title>
-    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root {{
-            --primary: #4267B2;
-            --primary-light: #5890FF;
-            --secondary: #E1306C;
-            --success: #4CAF50;
-            --warning: #FF9800;
-            --danger: #F44336;
-            --info: #2196F3;
-            --dark: #1A1A2E;
-            --light: #F8F9FA;
-            --gray: #6C757D;
-            --gray-light: #E9ECEF;
-            --border-radius: 12px;
-            --box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
-            --box-shadow-hover: 0 15px 40px rgba(0, 0, 0, 0.12);
-            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }}
-        
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        
-        body {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            background-attachment: fixed;
-            color: var(--dark);
-            min-height: 100vh;
-            overflow-x: hidden;
-        }}
-        
-        /* Glass Effect */
-        .glass-effect {{
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            box-shadow: var(--box-shadow);
-        }}
-        
-        /* Dashboard Layout */
-        .dashboard-wrapper {{
-            max-width: 1600px;
-            margin: 0 auto;
-            padding: 30px;
-        }}
-        
-        /* Header */
-        .dashboard-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 40px;
-            padding: 30px;
-            border-radius: var(--border-radius);
-            position: relative;
-            overflow: hidden;
-            background: linear-gradient(135deg, rgba(66, 103, 178, 0.9), rgba(225, 48, 108, 0.9));
-            color: white;
-        }}
-        
-        .dashboard-header::before {{
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, #FF0000, #4267B2, #E1306C);
-        }}
-        
-        .header-left h1 {{
-            font-size: 2.2rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }}
-        
-        .header-left p {{
-            opacity: 0.9;
-            font-size: 1.1rem;
-        }}
-        
-        .header-stats {{
-            display: flex;
-            gap: 20px;
-        }}
-        
-        .header-stat {{
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px 25px;
-            border-radius: 10px;
-            text-align: center;
-            backdrop-filter: blur(5px);
-        }}
-        
-        .header-stat-value {{
-            font-size: 2rem;
-            font-weight: 700;
-        }}
-        
-        .header-stat-label {{
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }}
-        
-        /* Main Layout */
-        .dashboard-main {{
-            display: grid;
-            grid-template-columns: 280px 1fr;
-            gap: 30px;
-        }}
-        
-        /* Sidebar Navigation */
-        .sidebar {{
-            border-radius: var(--border-radius);
-            padding: 25px;
-            height: fit-content;
-            position: sticky;
-            top: 30px;
-        }}
-        
-        .nav-title {{
-            color: var(--gray);
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 20px;
-            font-weight: 600;
-        }}
-        
-        .nav-menu {{
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }}
-        
-        .nav-item {{
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 16px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            color: var(--gray);
-            font-weight: 500;
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
-            cursor: pointer;
-        }}
-        
-        .nav-item:hover {{
-            background: rgba(66, 103, 178, 0.08);
-            color: var(--primary);
-            transform: translateX(5px);
-        }}
-        
-        .nav-item.active {{
-            background: linear-gradient(135deg, rgba(66, 103, 178, 0.1), rgba(76, 175, 80, 0.1));
-            color: var(--primary);
-            font-weight: 600;
-        }}
-        
-        .nav-item.active::before {{
-            content: '';
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 4px;
-            background: linear-gradient(to bottom, var(--primary), var(--success));
-            border-radius: 0 4px 4px 0;
-        }}
-        
-        .nav-icon {{
-            font-size: 1.2rem;
-            width: 24px;
-        }}
-        
-        /* Content Areas */
-        .content-area {{
-            display: none;
-            animation: fadeIn 0.5s ease;
-        }}
-        
-        .content-area.active {{
-            display: block;
-        }}
-        
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-        
-        /* Stats Grid */
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 25px;
-            margin-bottom: 40px;
-        }}
-        
-        .stat-card {{
-            border-radius: var(--border-radius);
-            padding: 30px;
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
-        }}
-        
-        .stat-card:hover {{
-            transform: translateY(-5px);
-            box-shadow: var(--box-shadow-hover);
-        }}
-        
-        .stat-icon {{
-            font-size: 2.5rem;
-            margin-bottom: 15px;
-            width: 60px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.2);
-        }}
-        
-        .stat-value {{
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin: 10px 0;
-            color: var(--dark);
-        }}
-        
-        .stat-label {{
-            color: var(--gray);
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }}
-        
-        .stat-trend {{
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            font-size: 0.85rem;
-            margin-top: 10px;
-        }}
-        
-        .trend-up {{ color: var(--success); }}
-        .trend-down {{ color: var(--danger); }}
-        
-        /* Insights Section */
-        .insights-container {{
-            margin-bottom: 40px;
-        }}
-        
-        .insight-card {{
-            display: flex;
-            gap: 20px;
-            padding: 20px;
-            border-radius: var(--border-radius);
-            margin-bottom: 15px;
-            transition: var(--transition);
-        }}
-        
-        .insight-card:hover {{
-            transform: translateX(5px);
-        }}
-        
-        .insight-icon {{
-            flex-shrink: 0;
-            width: 50px;
-            height: 50px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            font-size: 1.5rem;
-        }}
-        
-        .insight-content {{
-            flex: 1;
-        }}
-        
-        .insight-text {{
-            font-size: 1rem;
-            line-height: 1.5;
-        }}
-        
-        /* Charts */
-        .charts-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-            gap: 30px;
-            margin-bottom: 40px;
-        }}
-        
-        .chart-card {{
-            border-radius: var(--border-radius);
-            padding: 30px;
-            transition: var(--transition);
-        }}
-        
-        .chart-card:hover {{
-            transform: translateY(-3px);
-            box-shadow: var(--box-shadow-hover);
-        }}
-        
-        .chart-title {{
-            margin-bottom: 25px;
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: var(--dark);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }}
-        
-        .chart-container {{
-            width: 100%;
-            height: 350px;
-        }}
-        
-        /* Platform Cards */
-        .platform-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 40px;
-        }}
-        
-        .platform-card {{
-            padding: 25px;
-            border-radius: var(--border-radius);
-            text-align: center;
-            transition: var(--transition);
-        }}
-        
-        .platform-card:hover {{
-            transform: translateY(-5px);
-        }}
-        
-        .platform-icon {{
-            font-size: 2.5rem;
-            margin-bottom: 15px;
-        }}
-        
-        .instagram {{ color: #E1306C; }}
-        .facebook {{ color: #4267B2; }}
-        .twitter {{ color: #1DA1F2; }}
-        .tiktok {{ color: #000000; }}
-        .youtube {{ color: #FF0000; }}
-        
-        /* Performance Table */
-        .performance-table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            border-radius: var(--border-radius);
-            overflow: hidden;
-        }}
-        
-        .performance-table th {{
-            background: linear-gradient(135deg, var(--primary), var(--secondary));
-            color: white;
-            padding: 18px;
-            text-align: left;
-            font-weight: 600;
-        }}
-        
-        .performance-table td {{
-            padding: 16px;
-            border-bottom: 1px solid var(--gray-light);
-        }}
-        
-        .performance-table tr:hover {{
-            background: rgba(66, 103, 178, 0.05);
-        }}
-        
-        /* Footer */
-        .footer {{
-            text-align: center;
-            padding: 25px;
-            color: var(--gray);
-            font-size: 0.9rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            margin-top: 50px;
-            border-radius: var(--border-radius);
-        }}
-        
-        /* Responsive Design */
-        @media (max-width: 1200px) {{
-            .dashboard-main {{
-                grid-template-columns: 1fr;
-            }}
-            
-            .sidebar {{
-                display: none;
-            }}
-        }}
-        
-        @media (max-width: 768px) {{
-            .dashboard-wrapper {{
-                padding: 15px;
-            }}
-            
-            .dashboard-header {{
-                flex-direction: column;
-                gap: 20px;
-                text-align: center;
-            }}
-            
-            .header-stats {{
-                flex-wrap: wrap;
-                justify-content: center;
-            }}
-            
-            .stats-grid,
-            .charts-grid,
-            .platform-grid {{
-                grid-template-columns: 1fr;
-            }}
-            
-            .chart-container {{
-                height: 300px;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="dashboard-wrapper">
-        <!-- Header -->
-        <div class="dashboard-header glass-effect">
-            <div class="header-left">
-                <h1>
-                    <i class="fas fa-chart-line"></i>
-                    Social Media Analytics Dashboard
-                </h1>
-                <p>
-                    <i class="fas fa-calendar-alt"></i> {period_text} | 
-                    <i class="fas fa-file-alt"></i> {total_posts:,} posts analyzed
-                </p>
-            </div>
-            <div class="header-stats">
-                <div class="header-stat">
-                    <div class="header-stat-value">{total_posts:,}</div>
-                    <div class="header-stat-label">Total Posts</div>
-                </div>
-                <div class="header-stat">
-                    <div class="header-stat-value">{avg_engagement:,.0f}</div>
-                    <div class="header-stat-label">Avg Engagement</div>
-                </div>
-                <div class="header-stat">
-                    <div class="header-stat-value">{engagement_rate:.1f}%</div>
-                    <div class="header-stat-label">Engagement Rate</div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="dashboard-main">
-            <!-- Sidebar Navigation -->
-            <div class="sidebar glass-effect">
-                <div class="nav-title">Navigation</div>
-                <div class="nav-menu">
-                    <div class="nav-item active" onclick="showPage('overview')">
-                        <i class="fas fa-tachometer-alt nav-icon"></i>
-                        <span>Overview</span>
-                    </div>
-                    <div class="nav-item" onclick="showPage('performance')">
-                        <i class="fas fa-chart-bar nav-icon"></i>
-                        <span>Performance</span>
-                    </div>
-                    <div class="nav-item" onclick="showPage('trends')">
-                        <i class="fas fa-chart-line nav-icon"></i>
-                        <span>Trends</span>
-                    </div>
-                    <div class="nav-item" onclick="showPage('platforms')">
-                        <i class="fas fa-globe nav-icon"></i>
-                        <span>Platforms</span>
-                    </div>
-                    <div class="nav-item" onclick="showPage('insights')">
-                        <i class="fas fa-lightbulb nav-icon"></i>
-                        <span>Insights</span>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Main Content -->
-            <div class="main-content">
-                <!-- Overview Page -->
-                <div id="overview" class="content-area active">
-                    <!-- Insights -->
-                    <div class="insights-container">
-                        <h2 style="margin-bottom: 20px; color: var(--dark);">
-                            <i class="fas fa-lightbulb"></i> Automated Insights
-                        </h2>
-                        <div id="insights-list">
-                            {insights_html}
-                        </div>
-                    </div>
-                    
-                    <!-- Key Metrics -->
-                    <div class="stats-grid">
-                        <div class="stat-card glass-effect">
-                            <div class="stat-icon" style="background: rgba(66, 103, 178, 0.1); color: var(--primary);">
-                                <i class="fas fa-hashtag"></i>
-                            </div>
-                            <div class="stat-value">{total_posts:,}</div>
-                            <div class="stat-label">Total Posts</div>
-                            <div class="stat-trend trend-up">
-                                <i class="fas fa-arrow-up"></i>
-                                <span>Total analyzed</span>
-                            </div>
-                        </div>
-                        
-                        <div class="stat-card glass-effect">
-                            <div class="stat-icon" style="background: rgba(225, 48, 108, 0.1); color: var(--secondary);">
-                                <i class="fas fa-fire"></i>
-                            </div>
-                            <div class="stat-value">{avg_engagement:,.0f}</div>
-                            <div class="stat-label">Avg Engagement</div>
-                            <div class="stat-trend">
-                                <span>Per post average</span>
-                            </div>
-                        </div>
-                        
-                        <div class="stat-card glass-effect">
-                            <div class="stat-icon" style="background: rgba(76, 175, 80, 0.1); color: var(--success);">
-                                <i class="fas fa-percentage"></i>
-                            </div>
-                            <div class="stat-value">{engagement_rate:.1f}%</div>
-                            <div class="stat-label">Engagement Rate</div>
-                            <div class="stat-trend trend-up">
-                                <i class="fas fa-chart-line"></i>
-                                <span>Above avg: 3%</span>
-                            </div>
-                        </div>
-                        
-                        <div class="stat-card glass-effect">
-                            <div class="stat-icon" style="background: rgba(255, 152, 0, 0.1); color: var(--warning);">
-                                <i class="fas fa-link"></i>
-                            </div>
-                            <div class="stat-value">{links_percentage:.0f}%</div>
-                            <div class="stat-label">Posts with Links</div>
-                            <div class="stat-trend">
-                                <span>Trackable content</span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Content Distribution Charts -->
-                    <div class="charts-grid">
-                        <div class="chart-card glass-effect">
-                            <div class="chart-title">
-                                <i class="fas fa-chart-pie"></i> Content Type Distribution
-                            </div>
-                            <div class="chart-container" id="content-type-chart"></div>
-                        </div>
-                        
-                        <div class="chart-card glass-effect">
-                            <div class="chart-title">
-                                <i class="fas fa-chart-bar"></i> Platform Performance
-                            </div>
-                            <div class="chart-container" id="platform-performance-chart"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Performance Page -->
-                <div id="performance" class="content-area">
-                    <h2 style="margin-bottom: 30px; color: var(--dark);">
-                        <i class="fas fa-chart-bar"></i> Performance Analysis
-                    </h2>
-                    
-                    <!-- Top Posts Table -->
-                    <div class="chart-card glass-effect" style="margin-bottom: 40px;">
-                        <div class="chart-title">
-                            <i class="fas fa-trophy"></i> Top 10 Performing Posts
-                        </div>
-                        <div style="overflow-x: auto;">
-                            <table class="performance-table">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Post Title</th>
-                                        <th>Type</th>
-                                        <th>Engagement</th>
-                                        <th>Reach</th>
-                                        <th>Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="top-posts-table">
-                                    <!-- Will be populated by JavaScript -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <!-- Engagement Comparison -->
-                    <div class="charts-grid">
-                        <div class="chart-card glass-effect">
-                            <div class="chart-title">
-                                <i class="fas fa-chart-line"></i> Video vs Image Performance
-                            </div>
-                            <div class="chart-container" id="content-comparison-chart"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Trends Page -->
-                <div id="trends" class="content-area">
-                    <h2 style="margin-bottom: 30px; color: var(--dark);">
-                        <i class="fas fa-chart-line"></i> Engagement Trends
-                    </h2>
-                    
-                    <div class="charts-grid">
-                        <div class="chart-card glass-effect">
-                            <div class="chart-title">
-                                <i class="fas fa-calendar-alt"></i> Daily Engagement Trend
-                            </div>
-                            <div class="chart-container" id="daily-trend-chart"></div>
-                        </div>
-                        
-                        <div class="chart-card glass-effect">
-                            <div class="chart-title">
-                                <i class="fas fa-chart-bar"></i> Best Days to Post
-                            </div>
-                            <div class="chart-container" id="day-of-week-chart"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Platforms Page -->
-                <div id="platforms" class="content-area">
-                    <h2 style="margin-bottom: 30px; color: var(--dark);">
-                        <i class="fas fa-globe"></i> Platform Analysis
-                    </h2>
-                    
-                    <div class="platform-grid">
-                        <!-- Platforms will be populated by JavaScript -->
-                    </div>
-                    
-                    <div class="chart-card glass-effect">
-                        <div class="chart-title">
-                            <i class="fas fa-chart-pie"></i> Platform Distribution
-                        </div>
-                        <div class="chart-container" id="platform-distribution-chart"></div>
-                    </div>
-                </div>
-                
-                <!-- Insights Page -->
-                <div id="insights" class="content-area">
-                    <h2 style="margin-bottom: 30px; color: var(--dark);">
-                        <i class="fas fa-lightbulb"></i> Detailed Insights & Recommendations
-                    </h2>
-                    
-                    <!-- All Insights -->
-                    <div class="insights-container">
-                        <div id="all-insights-list">
-                            {insights_html}
-                        </div>
-                    </div>
-                    
-                    <!-- Recommendations -->
-                    <div class="chart-card glass-effect">
-                        <div class="chart-title">
-                            <i class="fas fa-bullseye"></i> Actionable Recommendations
-                        </div>
-                        <div style="padding: 20px;">
-                            <div id="recommendations-list">
-                                <!-- Will be populated by JavaScript -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Footer -->
-        <div class="footer glass-effect">
-            <p>Social Media Analytics Dashboard v2.0 | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-            <p style="margin-top: 10px; opacity: 0.7;">
-                <i class="fas fa-sync-alt"></i> Data updated in real-time | 
-                <i class="fas fa-shield-alt"></i> Secure analytics
-            </p>
-        </div>
-    </div>
-    
-    <script>
-        // Analytics data
-        const analyticsData = {analytics_json};
-        
-        // Navigation
-        function showPage(pageId) {{
-            // Hide all pages
-            document.querySelectorAll('.content-area').forEach(page => {{
-                page.classList.remove('active');
-            }});
-            
-            // Remove active class from all nav items
-            document.querySelectorAll('.nav-item').forEach(item => {{
-                item.classList.remove('active');
-            }});
-            
-            // Show selected page
-            document.getElementById(pageId).classList.add('active');
-            
-            // Add active class to clicked nav item
-            event.currentTarget.classList.add('active');
-            
-            // Initialize charts for the page
-            setTimeout(() => initializePageCharts(pageId), 100);
-        }}
-        
-        // Initialize page-specific charts
-        function initializePageCharts(pageId) {{
-            switch(pageId) {{
-                case 'overview':
-                    createOverviewCharts();
-                    break;
-                case 'performance':
-                    createPerformanceCharts();
-                    break;
-                case 'trends':
-                    createTrendCharts();
-                    break;
-                case 'platforms':
-                    createPlatformCharts();
-                    break;
-                case 'insights':
-                    createInsightsContent();
-                    break;
-            }}
-        }}
-        
-        // Overview Charts
-        function createOverviewCharts() {{
-            const summary = analyticsData.summary_stats;
-            
-            // Content Type Distribution
-            if (summary) {{
-                const contentData = [{{
-                    values: [summary.video_posts || 0, summary.image_posts || 0],
-                    labels: ['Video Posts', 'Image Posts'],
-                    type: 'pie',
-                    hole: 0.4,
-                    marker: {{
-                        colors: ['#FF0000', '#4267B2']
-                    }},
-                    textinfo: 'percent+label',
-                    hoverinfo: 'label+percent+value'
-                }}];
-                
-                Plotly.newPlot('content-type-chart', contentData, {{
-                    height: 320,
-                    margin: {{t: 20, b: 20, l: 20, r: 20}},
-                    showlegend: true,
-                    paper_bgcolor: 'transparent',
-                    plot_bgcolor: 'transparent'
-                }}, {{displayModeBar: false}});
-            }}
-            
-            // Platform Performance
-            const platforms = analyticsData.platform_analysis;
-            if (platforms) {{
-                const platformNames = [];
-                const platformEngagement = [];
-                const platformColors = [];
-                
-                for (const [platform, data] of Object.entries(platforms)) {{
-                    if (data && data.avg_engagement > 0) {{
-                        platformNames.push(platform);
-                        platformEngagement.push(data.avg_engagement);
-                        
-                        // Assign colors based on platform
-                        const colorMap = {{
-                            'Instagram': '#E1306C',
-                            'Facebook': '#4267B2',
-                            'Twitter': '#1DA1F2',
-                            'TikTok': '#000000',
-                            'YouTube': '#FF0000',
-                            'Other': '#6C757D'
-                        }};
-                        platformColors.push(colorMap[platform] || '#666');
-                    }}
-                }}
-                
-                if (platformNames.length > 0) {{
-                    const platformData = [{{
-                        x: platformNames,
-                        y: platformEngagement,
-                        type: 'bar',
-                        marker: {{color: platformColors}},
-                        text: platformEngagement.map(v => v.toLocaleString()),
-                        textposition: 'auto'
-                    }}];
-                    
-                    Plotly.newPlot('platform-performance-chart', platformData, {{
-                        height: 320,
-                        margin: {{t: 20, b: 100, l: 50, r: 30}},
-                        xaxis: {{title: 'Platform', tickangle: -45}},
-                        yaxis: {{title: 'Average Engagement'}},
-                        paper_bgcolor: 'transparent',
-                        plot_bgcolor: 'transparent'
-                    }}, {{displayModeBar: false}});
-                }}
-            }}
-        }}
-        
-        // Performance Charts
-        function createPerformanceCharts() {{
-            // Populate top posts table
-            const topPosts = analyticsData.performance_analysis?.top_posts || [];
-            const tableBody = document.getElementById('top-posts-table');
-            tableBody.innerHTML = '';
-            
-            topPosts.slice(0, 10).forEach((post, index) => {{
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${{index + 1}}</td>
-                    <td style="max-width: 300px;">${{post.title || 'Untitled'}}</td>
-                    <td><span class="badge">${{post.type || 'Post'}}</span></td>
-                    <td><strong>${{post.engagement?.toLocaleString() || 0}}</strong></td>
-                    <td>${{post.reach?.toLocaleString() || 'N/A'}}</td>
-                    <td>${{post.date || ''}}</td>
-                `;
-                tableBody.appendChild(row);
-            }});
-            
-            // Content comparison chart
-            const performance = analyticsData.performance_analysis;
-            if (performance?.avg_engagement_by_type) {{
-                const {{ video, post }} = performance.avg_engagement_by_type;
-                const comparisonData = [{{
-                    x: ['Video', 'Image/Post'],
-                    y: [video || 0, post || 0],
-                    type: 'bar',
-                    marker: {{
-                        color: ['#FF0000', '#4267B2']
-                    }},
-                    text: [video?.toLocaleString() || '0', post?.toLocaleString() || '0'],
-                    textposition: 'auto'
-                }}];
-                
-                Plotly.newPlot('content-comparison-chart', comparisonData, {{
-                    height: 320,
-                    margin: {{t: 20, b: 50, l: 50, r: 30}},
-                    xaxis: {{title: 'Content Type'}},
-                    yaxis: {{title: 'Average Engagement'}},
-                    paper_bgcolor: 'transparent',
-                    plot_bgcolor: 'transparent'
-                }}, {{displayModeBar: false}});
-            }}
-        }}
-        
-        // Trend Charts
-        function createTrendCharts() {{
-            const trends = analyticsData.engagement_trends;
-            
-            // Daily trend chart
-            if (trends?.daily) {{
-                // Filter out invalid data
-                const validData = trends.daily.dates.map((date, i) => ({{
-                    date,
-                    engagement: trends.daily.engagements[i] || 0
-                }})).filter(item => item.date && !isNaN(item.engagement));
-                
-                if (validData.length > 0) {{
-                    const trendData = [{{
-                        x: validData.map(d => d.date),
-                        y: validData.map(d => d.engagement),
-                        mode: 'lines+markers',
-                        name: 'Daily Engagement',
-                        line: {{color: '#4267B2', width: 3}},
-                        marker: {{size: 6}}
-                    }}];
-                    
-                    // Add 7-day moving average if available
-                    if (trends.daily.engagement_7d_avg?.length > 0) {{
-                        const avgData = [{{
-                            x: validData.map(d => d.date),
-                            y: trends.daily.engagement_7d_avg.slice(0, validData.length),
-                            mode: 'lines',
-                            name: '7-Day Average',
-                            line: {{color: '#E1306C', width: 2, dash: 'dash'}}
-                        }}];
-                        trendData.push(avgData[0]);
-                    }}
-                    
-                    Plotly.newPlot('daily-trend-chart', trendData, {{
-                        height: 320,
-                        margin: {{t: 20, b: 50, l: 50, r: 30}},
-                        xaxis: {{title: 'Date', tickangle: -45}},
-                        yaxis: {{title: 'Engagement'}},
-                        paper_bgcolor: 'transparent',
-                        plot_bgcolor: 'transparent',
-                        showlegend: true
-                    }}, {{displayModeBar: false}});
-                }}
-            }}
-            
-            // Day of week chart
-            if (trends?.day_of_week) {{
-                const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-                const dayData = days.map(day => {{
-                    const stats = trends.day_of_week[day];
-                    return stats ? stats.avg_engagement || 0 : 0;
-                }});
-                
-                const dayChartData = [{{
-                    x: days,
-                    y: dayData,
-                    type: 'bar',
-                    marker: {{
-                        color: dayData.map((val, i) => i === days.indexOf(trends.best_day) ? '#4CAF50' : '#4267B2')
-                    }},
-                    text: dayData.map(val => val.toFixed(0)),
-                    textposition: 'auto'
-                }}];
-                
-                Plotly.newPlot('day-of-week-chart', dayChartData, {{
-                    height: 320,
-                    margin: {{t: 20, b: 50, l: 50, r: 30}},
-                    xaxis: {{title: 'Day of Week'}},
-                    yaxis: {{title: 'Average Engagement'}},
-                    paper_bgcolor: 'transparent',
-                    plot_bgcolor: 'transparent',
-                    annotations: trends.best_day ? [{{
-                        x: trends.best_day,
-                        y: dayData[days.indexOf(trends.best_day)],
-                        text: 'Best Day',
-                        showarrow: true,
-                        arrowhead: 2,
-                        arrowsize: 1,
-                        arrowwidth: 2,
-                        arrowcolor: '#4CAF50'
-                    }}] : []
-                }}, {{displayModeBar: false}});
-            }}
-        }}
-        
-        // Platform Charts
-        function createPlatformCharts() {{
-            const platforms = analyticsData.platform_analysis;
-            const platformGrid = document.querySelector('.platform-grid');
-            
-            if (platforms && platformGrid) {{
-                platformGrid.innerHTML = '';
-                
-                const platformIcons = {{
-                    'Instagram': 'fa-instagram',
-                    'Facebook': 'fa-facebook',
-                    'Twitter': 'fa-twitter',
-                    'TikTok': 'fa-music',
-                    'YouTube': 'fa-youtube',
-                    'Other': 'fa-globe'
-                }};
-                
-                const platformColors = {{
-                    'Instagram': '#E1306C',
-                    'Facebook': '#4267B2',
-                    'Twitter': '#1DA1F2',
-                    'TikTok': '#000000',
-                    'YouTube': '#FF0000',
-                    'Other': '#6C757D'
-                }};
-                
-                for (const [platform, data] of Object.entries(platforms)) {{
-                    if (data && data.avg_engagement > 0) {{
-                        const card = document.createElement('div');
-                        card.className = 'platform-card glass-effect';
-                        card.style.background = `rgba(${{hexToRgb(platformColors[platform] || '#666')}}, 0.1)`;
-                        
-                        card.innerHTML = `
-                            <div class="platform-icon" style="color: ${{platformColors[platform] || '#666'}}">
-                                <i class="fab ${{platformIcons[platform] || 'fa-globe'}}"></i>
-                            </div>
-                            <h3 style="margin-bottom: 10px;">${{platform}}</h3>
-                            <div style="font-size: 2rem; font-weight: 700; margin-bottom: 10px;">
-                                ${{data.avg_engagement.toLocaleString()}}
-                            </div>
-                            <div style="color: #666; font-size: 0.9rem;">
-                                ${{data.post_count || 0}} posts
-                            </div>
-                        `;
-                        
-                        platformGrid.appendChild(card);
-                    }}
-                }}
-            }}
-            
-            // Platform distribution chart
-            if (platforms) {{
-                const platformNames = [];
-                const platformCounts = [];
-                const platformColors = [];
-                
-                for (const [platform, data] of Object.entries(platforms)) {{
-                    if (data && data.post_count > 0) {{
-                        platformNames.push(platform);
-                        platformCounts.push(data.post_count);
-                        
-                        const colorMap = {{
-                            'Instagram': '#E1306C',
-                            'Facebook': '#4267B2',
-                            'Twitter': '#1DA1F2',
-                            'TikTok': '#000000',
-                            'YouTube': '#FF0000',
-                            'Other': '#6C757D'
-                        }};
-                        platformColors.push(colorMap[platform] || '#666');
-                    }}
-                }}
-                
-                if (platformNames.length > 0) {{
-                    const distributionData = [{{
-                        values: platformCounts,
-                        labels: platformNames,
-                        type: 'pie',
-                        hole: 0.3,
-                        marker: {{colors: platformColors}},
-                        textinfo: 'percent+label',
-                        hoverinfo: 'label+percent+value'
-                    }}];
-                    
-                    Plotly.newPlot('platform-distribution-chart', distributionData, {{
-                        height: 320,
-                        margin: {{t: 20, b: 20, l: 20, r: 20}},
-                        showlegend: true,
-                        paper_bgcolor: 'transparent',
-                        plot_bgcolor: 'transparent'
-                    }}, {{displayModeBar: false}});
-                }}
-            }}
-        }}
-        
-        // Insights Content
-        function createInsightsContent() {{
-            // Generate recommendations based on analytics
-            const recommendations = [];
-            const summary = analyticsData.summary_stats;
-            const performance = analyticsData.performance_analysis;
-            const trends = analyticsData.engagement_trends;
-            
-            // Recommendation 1: Content type
-            if (performance?.avg_engagement_by_type) {{
-                const {{ video, post }} = performance.avg_engagement_by_type;
-                if (video > post * 1.5) {{
-                    recommendations.push({{
-                        icon: 'fa-video',
-                        title: 'Double Down on Video',
-                        text: 'Video content performs 50%+ better than images. Create more video content.'
-                    }});
-                }}
-            }}
-            
-            // Recommendation 2: Posting schedule
-            if (trends?.best_day) {{
-                recommendations.push({{
-                    icon: 'fa-calendar-alt',
-                    title: 'Optimize Posting Schedule',
-                    text: `Post more on ${{trends.best_day}}s when engagement is highest.`
-                }});
-            }}
-            
-            // Recommendation 3: Links
-            if (summary?.links_percentage < 50) {{
-                recommendations.push({{
-                    icon: 'fa-link',
-                    title: 'Add More Trackable Links',
-                    text: `Only ${{summary.links_percentage}}% of posts have links. Add links to track performance.`
-            }});
-            }}
-            
-            // Recommendation 4: Content consistency
-            const dailyData = trends?.daily?.engagements || [];
-            if (dailyData.length > 0) {{
-                const avg = dailyData.reduce((a, b) => a + b, 0) / dailyData.length;
-                const stdDev = Math.sqrt(dailyData.reduce((sq, n) => sq + Math.pow(n - avg, 2), 0) / dailyData.length);
-                const cv = (stdDev / avg) * 100;
-                
-                if (cv > 50) {{
-                    recommendations.push({{
-                        icon: 'fa-chart-line',
-                        title: 'Improve Content Consistency',
-                        text: 'Engagement varies significantly day-to-day. Maintain consistent posting quality.'
-                }});
-                }}
-            }}
-            
-            // Display recommendations
-            const recommendationsList = document.getElementById('recommendations-list');
-            if (recommendationsList) {{
-                recommendationsList.innerHTML = '';
-                recommendations.forEach(rec => {{
-                    const div = document.createElement('div');
-                    div.className = 'insight-card glass-effect';
-                    div.style.marginBottom = '15px';
-                    div.innerHTML = `
-                        <div class="insight-icon">
-                            <i class="fas ${{rec.icon}}"></i>
-                        </div>
-                        <div class="insight-content">
-                            <h4 style="margin-bottom: 5px; color: var(--dark);">${{rec.title}}</h4>
-                            <div class="insight-text">${{rec.text}}</div>
-                        </div>
-                    `;
-                    recommendationsList.appendChild(div);
-                }});
-            }}
-        }}
-        
-        // Utility function to convert hex to rgb
-        function hexToRgb(hex) {{
-            const result = /^#?([a-f\\d]{{2}})([a-f\\d]{{2}})([a-f\\d]{{2}})$/i.exec(hex);
-            return result ? 
-                `${{parseInt(result[1], 16)}}, ${{parseInt(result[2], 16)}}, ${{parseInt(result[3], 16)}}` : 
-                '102, 102, 102';
-        }}
-        
-        // Initialize dashboard
-        window.onload = function() {{
-            // Initialize overview page
-            createOverviewCharts();
-        }};
-    </script>
-</body>
-</html>'''
-    
-    # Save the HTML file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html)
-    
-    print(f"✅ Modern dashboard saved to: {output_path}")
-    return output_path
-
-
 if __name__ == "__main__":
-    print("Social Media Dashboard Generator")
+    print("Social Media Dashboard Generator v2.0")
     print("=" * 50)
-    print("This module is designed to be imported by app.py")
-    print("Run app.py to use the dashboard functionality.")
+    print("This module requires Excel files created by the Social Media Extractor.")
+    print("Run app.py or main.py to process PowerPoint files first.")
